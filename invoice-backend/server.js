@@ -5,7 +5,7 @@ const bodyParser = require('body-parser')
 const cors = require('cors')
 const logger = require('./utils/logger')
 const routes = require('./routes')
-
+const modesRouter = require('./routes/modes');
 const app = express()
 const port = process.env.PORT || 4000
 
@@ -17,6 +17,7 @@ app.get('/health', (req, res) => res.json({ ok: true, env: process.env.NODE_ENV 
 
 // mount API routes
 app.use('/api', routes)
+app.use('/api/modes', modesRouter);
 
 // admin route example (protected)
 app.post('/api/admin/reset-stub', (req, res) => {
