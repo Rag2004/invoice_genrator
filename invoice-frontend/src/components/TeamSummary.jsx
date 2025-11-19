@@ -1,264 +1,323 @@
 // src/components/TeamSummary.jsx
-import React from 'react'
+import React, { useEffect, useState } from 'react';
 
-/**
- Updated TeamSummary.jsx
- - Plug-and-play replacement for your existing TeamSummary component.
- - Preserves the same props and updateInvoice contract:
-     Props:
-       - invoice: { items: [...] }
-       - updateInvoice: function(partialInvoice)  // e.g., updateInvoice({ items: [...] })
-       - teamOptions: array of templates [{ id, name, factor, defaultMode, defaultRate }]
-       - loadingTeam: boolean
-       - baseHourlyRate: number
- - Features:
-     - Add / Remove rows
-     - Template picker (select) applies name, factor, mode and template defaultRate
-     - Hours, Factor, Mode, Rate editable
-     - Manual rate detection: when user edits rate the row is marked as manual and will not be overridden by baseHourlyRate changes
-     - Automatic recalculation when hours/factor/rate/baseHourlyRate change
-     - Uses your existing CSS classes (.input, .btn, .btn-primary, .btn-danger, .muted, .team-row)
- - Drop-in: overwrite your current file with this content.
-*/
+const uuidv4 = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
-const uuidv4 = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+// Default mode factors (fallback if not in team data)
+const DEFAULT_MODE_FACTORS = {
+  Online: 1.0,
+  Offline: 1.5,
+  Studio: 2.0,
+};
 
-function toNumber(v, fallback = 0) {
-  if (v === '' || v === null || v === undefined) return fallback
-  const n = Number(v)
-  return Number.isFinite(n) ? n : fallback
-}
-
-function formatCurrency(n) {
-  try {
-    return n?.toLocaleString ? n.toLocaleString() : String(n)
-  } catch (e) {
-    return String(n)
-  }
-}
-
-function computeAmount(row, baseHourlyRate = 0) {
-  const factor = toNumber(row.factor, 1)
-  const hours = toNumber(row.hours, 0)
-
-  // determine rate:
-  // - if user edited rate (row._manualRate === true) keep the explicit row.rate (coerced to number)
-  // - else if row.rate present (from template) use it
-  // - else use baseHourlyRate * factor
-  let rate = 0
-  if (row._manualRate === true) {
-    rate = toNumber(row.rate, 0)
-  } else if (typeof row.rate !== 'undefined' && row.rate !== null && row.rate !== '') {
-    rate = toNumber(row.rate, baseHourlyRate * factor)
-  } else {
-    rate = toNumber(baseHourlyRate * factor, 0)
-  }
-
-  const amount = Math.round((hours * rate) * 100) / 100
-  return {
-    ...row,
-    factor,
-    hours,
-    rate,
-    amount,
-  }
-}
-
-export default function TeamSummary({
-  invoice,
-  updateInvoice,
-  teamOptions = [],
-  loadingTeam = false,
-  baseHourlyRate = 0,
+export default function TeamSummary({ 
+  invoice, 
+  updateInvoice, 
+  teamOptions = [], // Add default empty array
+  loadingTeam = false, 
+  baseHourlyRate = 0 
 }) {
-  const items = Array.isArray(invoice?.items) ? invoice.items : []
+  const [selectedMemberData, setSelectedMemberData] = useState({});
 
-  const setItems = (nextItems) => {
-    // Maintain same updateInvoice({ items: [...] }) contract
-    updateInvoice({ items: nextItems })
-  }
+  // Safely access invoice.items with default
+  const items = invoice?.items || [];
 
+  // Add new team member row
   const addRow = () => {
-    const id = uuidv4()
+    const id = uuidv4();
     const item = {
       id,
       name: '',
+      memberCode: '',
       factor: 1,
       mode: 'Online',
       hours: 1,
-      rate: undefined,
+      rate: baseHourlyRate || 0,
       amount: 0,
-      _manualRate: false,
-    }
-    const next = [...items, computeAmount(item, baseHourlyRate)]
-    setItems(next)
-  }
+      userEditedRate: false,
+    };
+    updateInvoice({ items: [...items, item] });
+  };
 
+  // Remove team member row
   const removeRow = (id) => {
-    setItems(items.filter(i => i.id !== id))
-  }
+    const newItems = items.filter(i => i.id !== id);
+    updateInvoice({ items: newItems });
+    
+    // Clean up selected member data
+    const newSelectedData = { ...selectedMemberData };
+    delete newSelectedData[id];
+    setSelectedMemberData(newSelectedData);
+  };
 
+  // Update team member row
   const updateRow = (id, patch) => {
-    const next = items.map(it => {
-      if (it.id !== id) return it
-      const merged = { ...it, ...patch }
-      return computeAmount(merged, baseHourlyRate)
-    })
-    setItems(next)
-  }
+    updateInvoice({
+      items: items.map(it => 
+        it.id === id ? computeAmount({ ...it, ...patch }) : it
+      )
+    });
+  };
 
-  const chooseTemplate = (id, templateValue) => {
-    if (!templateValue) {
-      // clear template selection for this row
-      updateRow(id, { name: '', factor: 1, mode: 'Online', rate: undefined, _manualRate: false })
-      return
+  // Handle member selection from dropdown
+  const handleMemberSelect = (rowId, memberCode) => {
+    if (!memberCode) {
+      updateRow(rowId, { 
+        name: '', 
+        memberCode: '',
+        factor: 1,
+        rate: baseHourlyRate || 0,
+        userEditedRate: false 
+      });
+      return;
     }
-    const t = teamOptions.find(x => x.name === templateValue || x.id === templateValue)
-    if (!t) return
-    updateRow(id, {
-      name: t.name || '',
-      factor: typeof t.factor !== 'undefined' ? t.factor : 1,
-      mode: t.defaultMode || 'Online',
-      rate: (typeof t.defaultRate !== 'undefined' && t.defaultRate !== null) ? t.defaultRate : undefined,
-      _manualRate: false,
-    })
+
+    const member = teamOptions.find(m => 
+      String(m.id) === String(memberCode) || 
+      String(m.code) === String(memberCode)
+    );
+    
+    if (!member) {
+      return;
+    }
+
+    // Store member data for this row
+    setSelectedMemberData(prev => ({
+      ...prev,
+      [rowId]: member
+    }));
+
+    // Get factor from member data or default
+    const memberFactor = Number(member.factor || member.defaultFactor || 1);
+    const mode = member.defaultMode || 'Online';
+    const modeFactor = DEFAULT_MODE_FACTORS[mode] || 1;
+
+    // Calculate rate: baseHourlyRate * memberFactor * modeFactor
+    const calculatedRate = (baseHourlyRate || 0) * memberFactor * modeFactor;
+
+    updateRow(rowId, {
+      name: member.name || '',
+      memberCode: String(member.id || member.code || ''),
+      factor: memberFactor,
+      mode: mode,
+      rate: calculatedRate,
+      userEditedRate: false
+    });
+  };
+
+  // Handle mode change - recalculate rate based on new mode factor
+  const handleModeChange = (rowId, newMode) => {
+    const currentRow = items.find(it => it.id === rowId);
+    if (!currentRow) return;
+
+    // Don't recalculate if user manually edited rate
+    if (currentRow.userEditedRate) {
+      updateRow(rowId, { mode: newMode });
+      return;
+    }
+
+    const memberFactor = Number(currentRow.factor || 1);
+    const modeFactor = DEFAULT_MODE_FACTORS[newMode] || 1;
+    const calculatedRate = (baseHourlyRate || 0) * memberFactor * modeFactor;
+
+    updateRow(rowId, {
+      mode: newMode,
+      rate: calculatedRate
+    });
+  };
+
+  // Compute amount for a row
+  function computeAmount(row) {
+    const rateFromBase = Number(baseHourlyRate) || 0;
+    const rate = row.userEditedRate === true 
+      ? Number(row.rate || 0) 
+      : (Number(row.rate) > 0 ? Number(row.rate) : rateFromBase);
+    const hours = Number(row.hours || 0);
+    const amt = Math.round(hours * rate * 100) / 100;
+    return { ...row, rate, amount: amt };
   }
 
-  const markManualRate = (id) => {
-    // mark _manualRate true for the given row while keeping current numeric rate
-    const next = items.map(it => it.id === id ? ({ ...it, _manualRate: true, rate: toNumber(it.rate, 0) }) : it)
-    setItems(next)
-  }
+  // Recalculate all rows when base hourly rate changes
+  useEffect(() => {
+    if (!items.length) return;
+    
+    const updatedItems = items.map(it => {
+      // Skip if user manually edited the rate
+      if (it.userEditedRate) return computeAmount(it);
+      
+      // Recalculate rate based on factor and mode
+      const memberFactor = Number(it.factor || 1);
+      const modeFactor = DEFAULT_MODE_FACTORS[it.mode] || 1;
+      const calculatedRate = (baseHourlyRate || 0) * memberFactor * modeFactor;
+      
+      return computeAmount({ ...it, rate: calculatedRate });
+    });
 
-  // Recompute amounts when baseHourlyRate changes (preserve manual rates)
-  React.useEffect(() => {
-    if (!items.length) return
-    const next = items.map(it => {
-      if (it._manualRate) {
-        // If manual, recompute amount using existing rate (but ensure numeric)
-        return computeAmount({ ...it }, baseHourlyRate)
-      } else {
-        // Recompute with baseHourlyRate effect (do not preserve previous auto-rate)
-        return computeAmount({ ...it, rate: undefined }, baseHourlyRate)
-      }
-    })
-    setItems(next)
+    // Only update if something changed
+    if (JSON.stringify(updatedItems) !== JSON.stringify(items)) {
+      updateInvoice({ items: updatedItems });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseHourlyRate])
+  }, [baseHourlyRate]);
+
+  // Mark rate as manually edited
+  const markManualRate = (id) => {
+    updateInvoice({
+      items: items.map(it => 
+        it.id === id ? { ...it, userEditedRate: true } : it
+      )
+    });
+  };
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-        <h3 style={{ margin: 0 }}>Team & Hours</h3>
-        <button className="btn btn-primary" onClick={addRow}>Add member</button>
+      <div className="team-header">
+        <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 700 }}>
+          Team & Hours
+        </h3>
+        <button className="btn btn-primary btn-small" onClick={addRow}>
+          + Add Member
+        </button>
       </div>
 
-      <div>
+      <div style={{ marginTop: 16 }}>
         {loadingTeam ? (
-          <div className="muted">Loading team...</div>
+          <div className="muted" style={{ textAlign: 'center', padding: '12px' }}>
+            Loading team members...
+          </div>
         ) : (
           <div>
-            {items.length === 0 && <div className="muted">No members yet — click “Add member”.</div>}
+            {items.length === 0 ? (
+              <div className="muted" style={{ textAlign: 'center', padding: '24px' }}>
+                No team members added. Click "Add Member" to start.
+              </div>
+            ) : (
+              items.map(row => (
+                <div key={row.id} className="team-row-card" style={{ marginBottom: 12 }}>
+                  <div className="team-row">
+                    {/* Member Selection */}
+                    <div>
+                      <div className="small-text small">Team Member</div>
+                      <select
+                        className="select"
+                        value={row.memberCode || ''}
+                        onChange={e => handleMemberSelect(row.id, e.target.value)}
+                      >
+                        <option value="">Select member...</option>
+                        {Array.isArray(teamOptions) && teamOptions.map(member => (
+                          <option 
+                            key={member.id || member.code} 
+                            value={member.id || member.code}
+                          >
+                            {member.name}
+                          </option>
+                        ))}
+                      </select>
+                      {row.memberCode && (
+                        <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                          Factor: {row.factor || 1}
+                        </div>
+                      )}
+                    </div>
 
-            {items.map(row => (
-              <div key={row.id} className="team-row" style={{
-                display: 'flex',
-                gap: 12,
-                alignItems: 'flex-start',
-                padding: 12,
-                borderRadius: 8,
-                border: '1px solid var(--border,#eee)',
-                marginBottom: 10,
-                background: 'white',
-              }}>
-                {/* Left: Name + template picker */}
-                <div style={{ flex: 1, minWidth: 200 }}>
-                  <input
-                    className="input"
-                    placeholder="Member name"
-                    value={row.name || ''}
-                    onChange={e => updateRow(row.id, { name: e.target.value })}
-                    style={{ width: '100%', marginBottom: 8 }}
-                  />
-                  <select
-                    style={{ width: '100%', padding: '6px 8px' }}
-                    value={row.templateName || ''}
-                    onChange={e => chooseTemplate(row.id, e.target.value)}
-                  >
-                    <option value="">— pick template —</option>
-                    {teamOptions.map(t => <option key={t.id || t.name} value={t.name}>{t.name}</option>)}
-                  </select>
-                </div>
+                    {/* Mode Selection */}
+                    <div>
+                      <div className="small-text small">Mode</div>
+                      <select
+                        className="select"
+                        value={row.mode || 'Online'}
+                        onChange={e => handleModeChange(row.id, e.target.value)}
+                      >
+                        <option value="Online">Online ({DEFAULT_MODE_FACTORS.Online}x)</option>
+                        <option value="Offline">Offline ({DEFAULT_MODE_FACTORS.Offline}x)</option>
+                        <option value="Studio">Studio ({DEFAULT_MODE_FACTORS.Studio}x)</option>
+                      </select>
+                    </div>
 
-                {/* Factor */}
-                <div style={{ width: 100 }}>
-                  <div className="small-text small">Factor</div>
-                  <input
-                    className="input"
-                    type="number"
-                    min="0.1"
-                    step="0.1"
-                    value={row.factor}
-                    onChange={e => updateRow(row.id, { factor: e.target.value, _manualRate: false })}
-                  />
-                </div>
+                    {/* Hours Input */}
+                    <div>
+                      <div className="small-text small">Hours</div>
+                      <input
+                        className="input"
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        value={row.hours || 0}
+                        onChange={e => updateRow(row.id, { hours: Number(e.target.value) })}
+                      />
+                    </div>
 
-                {/* Mode */}
-                <div style={{ width: 120 }}>
-                  <div className="small-text small">Mode</div>
-                  <select
-                    className="input"
-                    value={row.mode}
-                    onChange={e => updateRow(row.id, { mode: e.target.value })}
-                    style={{ width: '100%' }}
-                  >
-                    <option>Online</option>
-                    <option>Offline</option>
-                    <option>Studio</option>
-                  </select>
-                </div>
+                    {/* Rate Input */}
+                    <div>
+                      <div className="small-text small">Rate (per hr)</div>
+                      <input
+                        className="input"
+                        type="number"
+                        min="0"
+                        value={row.rate || 0}
+                        onChange={e => {
+                          updateRow(row.id, { rate: Number(e.target.value) });
+                          markManualRate(row.id);
+                        }}
+                        title={row.userEditedRate ? "Manually edited" : "Auto-calculated"}
+                      />
+                      {row.userEditedRate && (
+                        <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                          Manual
+                        </div>
+                      )}
+                    </div>
 
-                {/* Hours */}
-                <div style={{ width: 100 }}>
-                  <div className="small-text small">Hours</div>
-                  <input
-                    className="input"
-                    type="number"
-                    min="0"
-                    value={row.hours}
-                    onChange={e => updateRow(row.id, { hours: e.target.value })}
-                  />
-                </div>
+                    {/* Amount Display */}
+                    <div className="text-right">
+                      <div className="small-text small">Amount</div>
+                      <div style={{ fontWeight: 700, fontSize: '1rem' }}>
+                        ₹{Number(row.amount || 0).toLocaleString('en-IN')}
+                      </div>
+                    </div>
 
-                {/* Rate */}
-                <div style={{ width: 160 }}>
-                  <div className="small-text small">Rate (per hr)</div>
-                  <input
-                    className="input"
-                    type="number"
-                    value={row.rate ?? ''}
-                    onChange={e => {
-                      updateRow(row.id, { rate: e.target.value })
-                      // mark manual after update — ensures _manualRate true and rate coerced to numeric
-                      // setTimeout to let updateInvoice propagate if it's synchronous in parent
-                      setTimeout(() => markManualRate(row.id), 0)
-                    }}
-                  />
-                </div>
-
-                {/* Amount & remove */}
-                <div style={{ width: 140, textAlign: 'right' }}>
-                  <div style={{ marginBottom: 8 }}><strong>₹{formatCurrency(row.amount || 0)}</strong></div>
-                  <div>
-                    <button className="btn btn-danger" onClick={() => removeRow(row.id)}>Remove</button>
+                    {/* Remove Button */}
+                    <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+                      <button
+                        className="btn btn-danger btn-small"
+                        onClick={() => removeRow(row.id)}
+                        title="Remove member"
+                      >
+                        ×
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-
+              ))
+            )}
           </div>
         )}
       </div>
+
+      {/* Team Options Info */}
+      {Array.isArray(teamOptions) && teamOptions.length > 0 && !loadingTeam && (
+        <div className="muted" style={{ marginTop: 16, fontSize: '0.813rem', textAlign: 'center' }}>
+          💡 {teamOptions.length} team member(s) available
+        </div>
+      )}
+
+      {/* Help Text */}
+      {items.length > 0 && (
+        <div 
+          className="muted" 
+          style={{ 
+            marginTop: 16, 
+            padding: '12px', 
+            background: 'var(--gray-50)', 
+            borderRadius: 'var(--radius)',
+            fontSize: '0.813rem'
+          }}
+        >
+          <strong>Rate Calculation:</strong> Base Rate × Member Factor × Mode Factor
+          <br />
+          <small>Edit rate manually to override auto-calculation</small>
+        </div>
+      )}
     </div>
-  )
+  );
 }
