@@ -664,6 +664,11 @@ textarea:focus {
   color: var(--gray-600);
   margin-bottom: 6px;
 }
+.stage-description-cell {
+  white-space: pre-wrap;
+  line-height: 1.4;
+}
+
 
 .earnings-box .earnings {
   font-size: 1.2rem;
