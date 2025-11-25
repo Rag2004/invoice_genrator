@@ -1,119 +1,161 @@
 
-// import React from 'react'
+// import React from 'react';
 
 // export default function ProjectDetails({
-//   invoice,
+//   invoice = {},
 //   updateInvoice,
 //   projectData,
 //   clientData,
-//   loadingProject,
-//   loadingClient,
-//   fetchError
+//   loadingProject = false,
+//   loadingClient = false,
+//   fetchError,
 // }) {
-//   const handleProjectChange = (val) => {
-//     updateInvoice({ projectCode: val })
-//   }
+  
+//   // Safe handlers
+//   const handleChange = (field, value) => {
+//     if (typeof updateInvoice === 'function') {
+//       updateInvoice({ [field]: value });
+//     }
+//   };
 
 //   return (
 //     <div>
-//       <h2 style={{ marginBottom: 12 }}>Project & Client</h2>
-
-//       <div className="grid-2" style={{ gap: 16 }}>
-//         <div>
+//       <div className="form-row">
+//         <div className="form-group">
 //           <label className="label">Project Code</label>
 //           <input
+//             type="text"
 //             className="input"
-//             value={invoice.projectCode}
-//             onChange={e => handleProjectChange(e.target.value)}
-//             placeholder="Type project code (e.g. PRJ_210325)"
+//             placeholder="PRJ_240205"
+//             value={invoice.projectCode || ''}
+//             onChange={(e) => handleChange('projectCode', e.target.value)}
 //           />
-//           {loadingProject && <div style={{ marginTop: 8, fontSize: 13, color: '#666' }}>Fetching project...</div>}
-//           {fetchError && <div style={{ color: 'crimson', marginTop: 6 }}>{fetchError}</div>}
+//           {loadingProject && (
+//             <small className="muted">Loading project details...</small>
+//           )}
+//           {fetchError && (
+//             <small className="error" style={{ color: 'var(--danger)', display: 'block', marginTop: 4 }}>
+//               ⚠️ {fetchError}
+//             </small>
+//           )}
 //         </div>
 
-//         <div>
+//         <div className="form-group">
 //           <label className="label">Client Code</label>
 //           <input
+//             type="text"
 //             className="input"
+//             placeholder="CLT_240205"
 //             value={invoice.clientCode || ''}
-//             onChange={e => updateInvoice({ clientCode: e.target.value })}
-//             placeholder="Client code or leave blank"
+//             onChange={(e) => handleChange('clientCode', e.target.value)}
+//             disabled
 //           />
+//           {loadingClient && (
+//             <small className="muted">Loading client details...</small>
+//           )}
 //         </div>
 //       </div>
 
-//       <div className="grid-2" style={{ gap: 16, marginTop: 12 }}>
-//         <div>
+//       <div className="form-row">
+//         <div className="form-group">
 //           <label className="label">Consultant Name</label>
 //           <input
+//             type="text"
 //             className="input"
+//             placeholder="Enter consultant name"
 //             value={invoice.consultantName || ''}
-//             onChange={e => updateInvoice({ consultantName: e.target.value })}
+//             onChange={(e) => handleChange('consultantName', e.target.value)}
 //           />
 //         </div>
 
-//         <div>
+//         <div className="form-group">
 //           <label className="label">Date</label>
 //           <input
-//             className="input"
 //             type="date"
+//             className="input"
 //             value={invoice.date || ''}
-//             onChange={e => updateInvoice({ date: e.target.value })}
+//             onChange={(e) => handleChange('date', e.target.value)}
 //           />
 //         </div>
 //       </div>
 
-//       <div className="grid-2" style={{ gap: 16, marginTop: 12 }}>
-//         <div>
+//       <div className="form-row">
+//         <div className="form-group">
+//           <label className="label">Base Hourly Rate (₹)</label>
+//           <input
+//             type="number"
+//             className="input"
+//             placeholder="6000"
+//             value={invoice.baseHourlyRate || 0}
+//             onChange={(e) => handleChange('baseHourlyRate', Number(e.target.value))}
+//             min="0"
+//           />
+//         </div>
+
+//         <div className="form-group">
 //           <label className="label">Service Fee %</label>
 //           <input
+//             type="number"
 //             className="input"
-//             value={invoice.serviceFeePct || ''}
-//             onChange={e => updateInvoice({ serviceFeePct: e.target.value })}
-//           />
-//         </div>
-
-//         <div>
-//           <label className="label">Invoice # (assigned by server)</label>
-//           <input className="input" value={invoice.invoiceNumber || 'Assigned after save'} readOnly />
-//         </div>
-//       </div>
-
-//       <div className="grid-2" style={{ gap: 16, marginTop: 12 }}>
-//         <div>
-//           <label className="label">Base Hourly Rate</label>
-//           <input
-//             className="input"
-//             value={invoice.baseHourlyRate || 0}
-//             onChange={e => updateInvoice({ baseHourlyRate: Number(e.target.value || 0) })}
-//           />
-//         </div>
-
-//         <div>
-//           <label className="label">Billing Address</label>
-//           <input
-//             className="input"
-//             value={invoice.billingAddress || ''}
-//             onChange={e => updateInvoice({ billingAddress: e.target.value })}
+//             placeholder="25"
+//             value={invoice.serviceFeePct || 0}
+//             onChange={(e) => handleChange('serviceFeePct', Number(e.target.value))}
+//             min="0"
+//             max="100"
 //           />
 //         </div>
 //       </div>
 
-//       <div style={{ marginTop: 10 }}>
-//         <small style={{ color: '#666' }}>
-//           Package: <strong>{projectData?.Package || '-'}</strong> &nbsp; • &nbsp;
-//           Client: <strong>{clientData?.name || '-'}</strong>
-//         </small>
+//       <div className="form-group">
+//         <label className="label">Billing Address</label>
+//         <textarea
+//           className="textarea"
+//           placeholder="Enter billing address"
+//           value={invoice.billingAddress || ''}
+//           onChange={(e) => handleChange('billingAddress', e.target.value)}
+//           rows={4}
+//         />
 //       </div>
+
+//       {projectData && (
+//         <div 
+//           className="success" 
+//           style={{ 
+//             padding: '12px', 
+//             background: '#f0fdf4', 
+//             borderRadius: '8px', 
+//             marginTop: '12px',
+//             fontSize: '0.875rem',
+//             color: 'var(--success)'
+//           }}
+//         >
+//           ✅ Project loaded: {projectData.name || projectData.projectCode || 'Success'}
+//         </div>
+//       )}
+
+//       {clientData && (
+//         <div 
+//           className="success" 
+//           style={{ 
+//             padding: '12px', 
+//             background: '#f0fdf4', 
+//             borderRadius: '8px', 
+//             marginTop: '12px',
+//             fontSize: '0.875rem',
+//             color: 'var(--success)'
+//           }}
+//         >
+//           ✅ Client loaded: {clientData.name || clientData.clientCode || 'Success'}
+//         </div>
+//       )}
 //     </div>
-//   )
+//   );
 // }
-// src/components/ProjectDetails.jsx
 // src/components/ProjectDetails.jsx
 import React from 'react';
 
 export default function ProjectDetails({
-  invoice = {},
+  invoice,
   updateInvoice,
   projectData,
   clientData,
@@ -121,57 +163,50 @@ export default function ProjectDetails({
   loadingClient = false,
   fetchError,
 }) {
-  
-  // Safe handlers
   const handleChange = (field, value) => {
-    if (typeof updateInvoice === 'function') {
-      updateInvoice({ [field]: value });
-    }
+    updateInvoice({ [field]: value });
   };
 
   return (
     <div>
       <div className="form-row">
+        {/* Project Code (ONLY field user must type) */}
         <div className="form-group">
           <label className="label">Project Code</label>
           <input
-            type="text"
             className="input"
             placeholder="PRJ_240205"
             value={invoice.projectCode || ''}
             onChange={(e) => handleChange('projectCode', e.target.value)}
           />
           {loadingProject && (
-            <small className="muted">Loading project details...</small>
+            <p className="small-text muted">Fetching project details…</p>
           )}
           {fetchError && (
-            <small className="error" style={{ color: 'var(--danger)', display: 'block', marginTop: 4 }}>
-              ⚠️ {fetchError}
-            </small>
+            <p className="small-text error">Failed: {fetchError}</p>
           )}
         </div>
 
+        {/* Client Code – auto from project sheet, read-only */}
         <div className="form-group">
           <label className="label">Client Code</label>
           <input
-            type="text"
             className="input"
-            placeholder="CLT_240205"
             value={invoice.clientCode || ''}
-            onChange={(e) => handleChange('clientCode', e.target.value)}
+            readOnly
             disabled
           />
           {loadingClient && (
-            <small className="muted">Loading client details...</small>
+            <p className="small-text muted">Fetching client details…</p>
           )}
         </div>
       </div>
 
       <div className="form-row">
+        {/* Consultant Name – user types this */}
         <div className="form-group">
           <label className="label">Consultant Name</label>
           <input
-            type="text"
             className="input"
             placeholder="Enter consultant name"
             value={invoice.consultantName || ''}
@@ -179,86 +214,69 @@ export default function ProjectDetails({
           />
         </div>
 
+        {/* Consultant ID – auto from project sheet, read-only */}
         <div className="form-group">
-          <label className="label">Date</label>
+          <label className="label">Consultant ID</label>
           <input
-            type="date"
             className="input"
-            value={invoice.date || ''}
-            onChange={(e) => handleChange('date', e.target.value)}
+            value={invoice.consultantId || ''}
+            readOnly
+            disabled
           />
         </div>
       </div>
 
       <div className="form-row">
+        {/* Date – user can still change */}
         <div className="form-group">
-          <label className="label">Base Hourly Rate (₹)</label>
+          <label className="label">Date</label>
           <input
-            type="number"
             className="input"
-            placeholder="6000"
-            value={invoice.baseHourlyRate || 0}
-            onChange={(e) => handleChange('baseHourlyRate', Number(e.target.value))}
-            min="0"
+            type="date"
+            value={invoice.date || ''}
+            onChange={(e) => handleChange('date', e.target.value)}
           />
         </div>
 
+        {/* Service Fee % – auto from sheet, read-only */}
         <div className="form-group">
           <label className="label">Service Fee %</label>
           <input
-            type="number"
             className="input"
-            placeholder="25"
-            value={invoice.serviceFeePct || 0}
-            onChange={(e) => handleChange('serviceFeePct', Number(e.target.value))}
-            min="0"
-            max="100"
+            value={invoice.serviceFeePct || ''}
+            readOnly
+            disabled
           />
         </div>
       </div>
 
+      <div className="form-row">
+        {/* Base hourly rate – auto, read-only */}
+        <div className="form-group">
+          <label className="label">Base Hourly Rate (₹)</label>
+          <input
+            className="input"
+            value={invoice.baseHourlyRate || ''}
+            readOnly
+            disabled
+          />
+        </div>
+
+        {/* Just an empty placeholder column to keep grid aligned */}
+        <div className="form-group" />
+      </div>
+
+      {/* Billing address – auto from sheet, read-only */}
       <div className="form-group">
         <label className="label">Billing Address</label>
         <textarea
           className="textarea"
-          placeholder="Enter billing address"
+          placeholder="Billing address from sheet"
           value={invoice.billingAddress || ''}
-          onChange={(e) => handleChange('billingAddress', e.target.value)}
-          rows={4}
+          readOnly
+          disabled
         />
       </div>
-
-      {projectData && (
-        <div 
-          className="success" 
-          style={{ 
-            padding: '12px', 
-            background: '#f0fdf4', 
-            borderRadius: '8px', 
-            marginTop: '12px',
-            fontSize: '0.875rem',
-            color: 'var(--success)'
-          }}
-        >
-          ✅ Project loaded: {projectData.name || projectData.projectCode || 'Success'}
-        </div>
-      )}
-
-      {clientData && (
-        <div 
-          className="success" 
-          style={{ 
-            padding: '12px', 
-            background: '#f0fdf4', 
-            borderRadius: '8px', 
-            marginTop: '12px',
-            fontSize: '0.875rem',
-            color: 'var(--success)'
-          }}
-        >
-          ✅ Client loaded: {clientData.name || clientData.clientCode || 'Success'}
-        </div>
-      )}
     </div>
   );
 }

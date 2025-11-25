@@ -7,5 +7,6 @@ router.use('/projects', require('./projects'))
 router.use('/clients', require('./clients'))
 router.use('/invoices', require('./invoices'))
 router.use('/modes', require('./modes'))
+router.use('/auth', require('./auth'))
 
 module.exports = router
