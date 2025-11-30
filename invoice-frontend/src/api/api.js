@@ -62,70 +62,120 @@
 // export const fetchTeam = getTeam;
 // src/api/api.js
 
+// src/api/api.js
+// Central API helper for auth + invoice endpoints
+
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:4000/api';
 
-async function fetchJson(url, options = {}) {
-  const resp = await fetch(url, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    },
-    ...options,
+// ---------- Generic helpers ----------
+async function apiGet(path) {
+  const resp = await fetch(`${API_BASE}${path}`, {
+    credentials: 'include',
   });
 
   if (!resp.ok) {
     const text = await resp.text();
-    throw new Error(`Request failed ${resp.status}: ${text}`);
+    throw new Error(text || `GET ${path} failed with ${resp.status}`);
   }
+  return resp.json();
+}
 
-  // Handle empty responses safely
-  const text = await resp.text();
-  if (!text) return null;
+async function apiPost(path, body) {
+  const resp = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    credentials: 'include',
+    body: JSON.stringify(body || {}),
+  });
 
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(text || `POST ${path} failed with ${resp.status}`);
+  }
+  return resp.json();
+}
+
+// ===================== AUTH APIs =====================
+
+// Start login: send OTP to email
+export async function startLogin(email) {
+  if (!email) throw new Error('Email is required');
+  return apiPost('/auth/start-login', { email });
+}
+
+// Verify OTP
+export async function verifyOtp({ email, otp }) {
+  if (!email || !otp) throw new Error('Email and OTP are required');
+  return apiPost('/auth/verify-otp', { email, otp });
+}
+
+// Get logged-in user profile
+// src/api/api.js
+
+// Get logged-in user profile
+export async function getProfile() {
+  const token = localStorage.getItem('authToken');
+  
+  if (!token) {
+    throw new Error('No authentication token found');
+  }
+  
   try {
-    return JSON.parse(text);
-  } catch (e) {
-    throw new Error(`Invalid JSON from ${url}: ${text}`);
+    const response = await fetch(`${API_BASE}/auth/me`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      credentials: 'include',
+    });
+
+    const data = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(data.message || data.error || 'Failed to get profile');
+    }
+
+    return data;
+  } catch (error) {
+    console.error('❌ getProfile error:', error);
+    throw error;
   }
 }
 
-/**
- * GET /api/team
- * Returns list of team members from backend (which calls Apps Script getTeam)
- */
+// Update profile (name, etc.)
+export async function updateProfile(profile) {
+  return apiPost('/auth/update-profile', profile);
+}
+
+// Logout
+export async function logout() {
+  return apiPost('/auth/logout', {});
+}
+
+// ===================== INVOICE / SHEETS APIs =====================
+
+// Team members sheet
 export async function getTeam() {
-  return fetchJson(`${API_BASE}/team`);
+  return apiGet('/team');
 }
 
-/**
- * GET /api/projects/:code
- * Load a single project by project code
- */
-export async function getProject(code) {
-  if (!code) throw new Error('project code required');
-  const safe = encodeURIComponent(code);
-  return fetchJson(`${API_BASE}/projects/${safe}`);
+// Project sheet by project code
+export async function getProject(projectCode) {
+  if (!projectCode) throw new Error('Project code is required');
+  return apiGet(`/projects/${encodeURIComponent(projectCode)}`);
 }
 
-/**
- * GET /api/clients/:code
- * Load a single client by client code
- */
-export async function getClient(code) {
-  if (!code) throw new Error('client code required');
-  const safe = encodeURIComponent(code);
-  return fetchJson(`${API_BASE}/clients/${safe}`);
+// Client sheet by client code
+export async function getClient(clientCode) {
+  if (!clientCode) throw new Error('Client code is required');
+  return apiGet(`/clients/${encodeURIComponent(clientCode)}`);
 }
 
-/**
- * GET /api/invoices/:invoiceId
- * Load a single invoice (draft or final) by invoiceId
- * Used to “resume” a previously saved draft.
- */
+// Invoice by ID (for loading drafts)
 export async function getInvoiceById(invoiceId) {
-  if (!invoiceId) {
-    throw new Error('invoiceId is required');
-  }
-  const safe = encodeURIComponent(invoiceId);
-  return fetchJson(`${API_BASE}/invoices/${safe}`);
+  if (!invoiceId) throw new Error('Invoice ID is required');
+  return apiGet(`/invoices/${encodeURIComponent(invoiceId)}`);
 }

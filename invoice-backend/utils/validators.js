@@ -2,93 +2,127 @@
 const validator = require('validator');
 
 /**
+ * Helper to normalize shape so both `valid` and `isValid` work.
+ */
+function wrapValidity(result) {
+  // always add isValid mirror of valid, and vice-versa
+  if (typeof result.valid === 'boolean' && typeof result.isValid !== 'boolean') {
+    result.isValid = result.valid;
+  }
+  if (typeof result.isValid === 'boolean' && typeof result.valid !== 'boolean') {
+    result.valid = result.isValid;
+  }
+  return result;
+}
+
+/**
  * Validate email address
  * @param {string} email
- * @returns {object} { valid: boolean, error: string }
+ * @returns {{ valid: boolean, isValid: boolean, error?: string, email?: string }}
  */
 function validateEmail(email) {
   if (!email || typeof email !== 'string') {
-    return { valid: false, error: 'Email is required' };
+    return wrapValidity({ valid: false, error: 'Email is required' });
   }
 
   const trimmedEmail = email.trim().toLowerCase();
 
   if (!validator.isEmail(trimmedEmail)) {
-    return { valid: false, error: 'Invalid email format' };
+    return wrapValidity({ valid: false, error: 'Invalid email format' });
   }
 
   // Additional checks
   if (trimmedEmail.length > 254) {
-    return { valid: false, error: 'Email is too long' };
+    return wrapValidity({ valid: false, error: 'Email is too long' });
   }
 
-  return { valid: true, email: trimmedEmail };
+  return wrapValidity({ valid: true, email: trimmedEmail });
 }
 
 /**
  * Validate OTP code
  * @param {string} otp
- * @returns {object} { valid: boolean, error: string }
+ * @returns {{ valid: boolean, isValid: boolean, error?: string, otp?: string }}
  */
 function validateOTP(otp) {
   if (!otp || typeof otp !== 'string') {
-    return { valid: false, error: 'OTP is required' };
+    return wrapValidity({ valid: false, error: 'OTP is required' });
   }
 
   const trimmedOTP = otp.trim();
-  const otpLength = parseInt(process.env.OTP_LENGTH) || 6;
+  const otpLength = parseInt(process.env.OTP_LENGTH, 10) || 6;
 
   if (trimmedOTP.length !== otpLength) {
-    return { valid: false, error: `OTP must be ${otpLength} digits` };
+    return wrapValidity({
+      valid: false,
+      error: `OTP must be ${otpLength} digits`,
+    });
   }
 
   if (!/^\d+$/.test(trimmedOTP)) {
-    return { valid: false, error: 'OTP must contain only digits' };
+    return wrapValidity({
+      valid: false,
+      error: 'OTP must contain only digits',
+    });
   }
 
-  return { valid: true, otp: trimmedOTP };
+  return wrapValidity({ valid: true, otp: trimmedOTP });
 }
 
 /**
  * Validate name
  * @param {string} name
- * @returns {object} { valid: boolean, error: string }
+ * @returns {{ valid: boolean, isValid: boolean, error?: string, name?: string }}
  */
 function validateName(name) {
   if (!name || typeof name !== 'string') {
-    return { valid: false, error: 'Name is required' };
+    return wrapValidity({ valid: false, error: 'Name is required' });
   }
 
   const trimmedName = name.trim();
 
   if (trimmedName.length < 2) {
-    return { valid: false, error: 'Name must be at least 2 characters' };
+    return wrapValidity({
+      valid: false,
+      error: 'Name must be at least 2 characters',
+    });
   }
 
   if (trimmedName.length > 100) {
-    return { valid: false, error: 'Name is too long (max 100 characters)' };
+    return wrapValidity({
+      valid: false,
+      error: 'Name is too long (max 100 characters)',
+    });
   }
 
   // Allow letters, spaces, hyphens, and apostrophes
   if (!/^[a-zA-Z\s'-]+$/.test(trimmedName)) {
-    return { valid: false, error: 'Name can only contain letters, spaces, hyphens, and apostrophes' };
+    return wrapValidity({
+      valid: false,
+      error:
+        'Name can only contain letters, spaces, hyphens, and apostrophes',
+    });
   }
 
-  return { valid: true, name: trimmedName };
+  return wrapValidity({ valid: true, name: trimmedName });
 }
 
 /**
  * Validate phone number (optional)
  * @param {string} phone
- * @returns {object} { valid: boolean, error: string, phone: string }
+ * @returns {{ valid: boolean, isValid: boolean, error?: string, phone?: string }}
  */
 function validatePhone(phone) {
   if (!phone) {
-    return { valid: true, phone: '' }; // Phone is optional
+    // Phone is optional
+    return wrapValidity({ valid: true, phone: '' });
   }
 
   if (typeof phone !== 'string') {
-    return { valid: false, error: 'Invalid phone number format' };
+    return wrapValidity({
+      valid: false,
+      error: 'Invalid phone number format',
+    });
   }
 
   const trimmedPhone = phone.trim();
@@ -96,12 +130,15 @@ function validatePhone(phone) {
   // Remove common separators
   const cleanPhone = trimmedPhone.replace(/[\s\-\(\)\.]/g, '');
 
-  // Check if it's a valid mobile number (basic check)
+  // Basic mobile number check
   if (!/^\+?\d{10,15}$/.test(cleanPhone)) {
-    return { valid: false, error: 'Invalid phone number (10-15 digits required)' };
+    return wrapValidity({
+      valid: false,
+      error: 'Invalid phone number (10-15 digits required)',
+    });
   }
 
-  return { valid: true, phone: cleanPhone };
+  return wrapValidity({ valid: true, phone: cleanPhone });
 }
 
 /**
@@ -111,7 +148,6 @@ function validatePhone(phone) {
  */
 function sanitizeString(input) {
   if (!input || typeof input !== 'string') return '';
-  
   // Remove potentially dangerous characters
   return validator.escape(input.trim());
 }

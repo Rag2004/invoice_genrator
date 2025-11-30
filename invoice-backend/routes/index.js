@@ -8,5 +8,6 @@ router.use('/clients', require('./clients'))
 router.use('/invoices', require('./invoices'))
 router.use('/modes', require('./modes'))
 router.use('/auth', require('./auth'))
+router.use('/dashboard', require('./dashboard'))
 
 module.exports = router
