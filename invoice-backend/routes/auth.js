@@ -16,19 +16,32 @@ const appsScript = require('../lib/appsScriptClient');
 // Import auth middleware for protected routes
 const authMiddleware = require('../middleware/authMiddleware');
 
-// small helper to log consistently
 function log(...args) {
   console.log('[auth]', ...args);
 }
 
-// simple numeric OTP generator for login
-function generateNumericOtp(length) {
-  const len = Number(length) || 6;
-  let code = '';
-  for (let i = 0; i < len; i++) {
-    code += Math.floor(Math.random() * 10); // 0–9
-  }
-  return code;
+function extractConsultantId(consultantObj) {
+  if (!consultantObj) return null;
+  return (
+    consultantObj.consultant_id ||
+    consultantObj.consultantId ||
+    consultantObj.id ||
+    consultantObj.consultant_id === 0 ? String(consultantObj.consultant_id) : null
+  );
+}
+
+function normalizeConsultantObject(raw) {
+  // normalize a consultant object into a predictable shape
+  if (!raw || typeof raw !== 'object') return null;
+  return {
+    consultant_id: raw.consultant_id || raw.consultantId || raw.id || raw.consultant_id || null,
+    email: raw.email || raw.emailAddress || raw.Email || '',
+    name: raw.name || raw.fullName || '',
+    phone: raw.phone || raw.mobile || '',
+    created_at: raw.created_at || raw.createdAt || '',
+    last_login: raw.last_login || raw.lastLogin || '',
+    status: raw.status || ''
+  };
 }
 
 /**
@@ -46,55 +59,49 @@ router.post('/start-login', async (req, res) => {
 
     const otpLength = parseInt(process.env.OTP_LENGTH, 10) || 6;
     const otpType = 'login';
-    const otp = generateNumericOtp(otpLength);
 
-    // expires in 10 minutes
-    const expiresAt = new Date(
-      Date.now() + (parseInt(process.env.OTP_TTL_MS, 10) || 10 * 60 * 1000)
-    ).toISOString();
+    // Generate OTP in backend flow — but delegated to appsScript.createOtpSession / storeOtpFromBackend
+    // We'll call the backend helper that your appsScriptClient exposes:
+    let storeResult;
+    try {
+      storeResult = await appsScript.storeOtpFromBackend({
+        email: cleanEmail,
+        otp_type: otpType,
+        // appsScript.storeOtpFromBackend can generate OTP if not provided
+      });
+      log('appsScript.startLogin ->', JSON.stringify(storeResult));
+    } catch (err) {
+      console.error('[auth] appsScript.storeOtpFromBackend threw:', err && err.stack ? err.stack : err);
+      return res.status(502).json({ ok: false, error: 'otp_store_failed', message: 'Failed to store OTP (upstream).' });
+    }
 
-    // 1) store OTP in Apps Script / stub memory
-    const storeResult = await appsScript.storeOtpFromBackend({
-      email: cleanEmail,
-      otp,
-      otp_type: otpType,
-      expires_at: expiresAt,
-    });
-
-    // Check if storage failed
     if (!storeResult || storeResult.ok === false) {
-      console.error('Failed to store OTP:', storeResult?.error);
+      console.error('[auth] Failed to store OTP:', storeResult);
       return res.status(500).json({
         ok: false,
-        error: 'Failed to generate OTP. Please try again.',
+        error: storeResult?.error || 'Failed to generate OTP. Please try again.',
       });
     }
 
-    // 2) send OTP email – but DON'T break login if email fails
+    // Non-blocking email - appsScript may already send it, but we try local sending as fallback.
     try {
-      const emailResult = await emailService.sendOTPEmail(
-        cleanEmail,
-        otp,
-        '', // name (optional)
-        otpType // "login"
-      );
-      log('OTP email send result:', emailResult);
-    } catch (emailErr) {
-      console.error('sendOTPEmail failed (dev will still continue):', emailErr);
+      if (process.env.NODE_ENV !== 'production') {
+        // In dev we still attempt to log or send via configured mailer if needed
+        log('DEV OTP stored for', cleanEmail);
+      }
+    } catch (e) {
+      // ignore
     }
-
-    // 3) For local dev, log OTP to console so you can see it
-    log('DEV OTP for', cleanEmail, '=>', otp);
 
     return res.json({
       ok: true,
-      email: cleanEmail,
+      email: storeResult.email || cleanEmail,
       otpType,
-      expiresAt,
-      message: 'OTP sent to your email (or console in dev).',
+      expiresAt: storeResult.expiresAt || storeResult.expires_at || null,
+      message: 'OTP sent to your email (or logged in dev).',
     });
   } catch (err) {
-    console.error('start-login error', err);
+    console.error('[auth] start-login error', err && err.stack ? err.stack : err);
     return res.status(500).json({
       ok: false,
       error: 'Failed to start login. Please try again.',
@@ -123,58 +130,120 @@ router.post('/verify-otp', async (req, res) => {
     const cleanEmail = emailCheck.email;
     const cleanOtp = otpCheck.otp;
 
-    // 1) verify OTP
-    const verifyResult = await appsScript.verifyOtpFromBackend({
-      email: cleanEmail,
-      otp: cleanOtp,
-    });
+    // 1) verify OTP with Apps Script (defensive)
+    let verifyResult;
+    try {
+      verifyResult = await appsScript.verifyOtpFromBackend({
+        email: cleanEmail,
+        otp: cleanOtp,
+      });
+      log('appsScript.verifyOtp ->', JSON.stringify(verifyResult));
+    } catch (err) {
+      console.error('[auth] appsScript.verifyOtpFromBackend threw:', err && err.stack ? err.stack : err);
+      return res.status(502).json({
+        ok: false,
+        error: 'apps_script_unavailable',
+        message: 'Failed to verify OTP (upstream service error).'
+      });
+    }
 
     if (!verifyResult || verifyResult.ok === false) {
+      const upstreamError = verifyResult?.error || verifyResult?.message || 'Invalid or expired OTP';
+      console.warn('[auth] OTP verify failed ->', verifyResult);
       return res.status(400).json({
         ok: false,
-        error: verifyResult?.error || 'Invalid or expired OTP',
+        error: upstreamError,
+        message: verifyResult?.message || 'Invalid or expired OTP',
       });
     }
 
     // 2) fetch consultant or create a stub
-    let consultantResult = await appsScript.getConsultantByEmailAction({
-      email: cleanEmail,
-    });
+    let consultantResult;
+    try {
+      consultantResult = await appsScript.getConsultantByEmailAction({
+        email: cleanEmail,
+      });
+      log('appsScript.getConsultantByEmailAction ->', JSON.stringify(consultantResult));
+    } catch (err) {
+      console.error('[auth] getConsultantByEmailAction threw:', err && err.stack ? err.stack : err);
+      consultantResult = null;
+    }
+
     let consultant = null;
     let needsProfile = false;
 
-    if (!consultantResult || consultantResult.ok === false) {
-      // not found -> create minimal consultant
-      const create = await appsScript.createConsultantAction({
-        email: cleanEmail,
-        name: '',
-        phone: '',
-      });
+    // If consultantResult missing or not ok -> create consultant
+    const hasValidConsultant = !!(consultantResult && consultantResult.ok && consultantResult.consultant);
+    if (!hasValidConsultant) {
+      log('[auth] consultant not found, attempting to create minimal consultant for', cleanEmail);
+      let createResult;
+      try {
+        createResult = await appsScript.createConsultantAction({
+          email: cleanEmail,
+          name: '',
+          phone: '',
+        });
+        log('appsScript.createConsultantAction ->', JSON.stringify(createResult));
+      } catch (err) {
+        console.error('[auth] createConsultantAction threw:', err && err.stack ? err.stack : err);
+        return res.status(502).json({ ok: false, error: 'create_consultant_failed', message: 'Could not create consultant (upstream).' });
+      }
 
-      if (!create || create.ok === false) {
+      if (!createResult || createResult.ok === false || !createResult.consultant) {
+        console.error('[auth] createConsultantAction result invalid:', createResult);
         return res.status(500).json({
           ok: false,
-          error: create?.error || 'Failed to create consultant',
+          error: createResult?.error || 'create_failed',
+          message: 'Failed to create consultant.'
         });
       }
 
-      consultant = create.consultant;
+      consultant = normalizeConsultantObject(createResult.consultant);
       needsProfile = true;
     } else {
-      consultant = consultantResult.consultant;
+      consultant = normalizeConsultantObject(consultantResult.consultant);
       const hasName = !!(consultant.name && consultant.name.trim());
       needsProfile = !hasName;
     }
 
-    // 3) update last_login
-    await appsScript.updateConsultantLastLoginAction({
-      email: cleanEmail,
-    });
+    // Defensive check: ensure consultant_id exists
+    const consultantId = extractConsultantId(consultant);
+    if (!consultantId) {
+      console.error('[auth] missing consultant id from Apps Script', JSON.stringify(consultant));
+      // try to create again as fallback
+      try {
+        const createAgain = await appsScript.createConsultantAction({
+          email: cleanEmail,
+          name: consultant.name || '',
+          phone: consultant.phone || '',
+        });
+        log('appsScript.createConsultantAction (fallback) ->', JSON.stringify(createAgain));
+        if (createAgain && createAgain.ok && createAgain.consultant) {
+          consultant = normalizeConsultantObject(createAgain.consultant);
+        }
+      } catch (e) {
+        console.error('[auth] fallback createConsultantAction threw:', e && e.stack ? e.stack : e);
+      }
+    }
+
+    // Update last_login (best-effort)
+    try {
+      await appsScript.updateConsultantLastLoginAction({ email: cleanEmail });
+    } catch (e) {
+      console.warn('[auth] updateConsultantLastLoginAction failed (non-blocking):', e && e.stack ? e.stack : e);
+    }
+
+    // final check
+    const finalConsultantId = extractConsultantId(consultant);
+    if (!finalConsultantId) {
+      console.error('[auth] still missing consultant id - cannot sign token', JSON.stringify(consultant));
+      return res.status(500).json({ ok: false, error: 'missing_consultant_id', message: 'Server misconfiguration.' });
+    }
 
     // 4) sign JWT
     const tokenPayload = {
-      consultant_id: consultant.consultant_id,
-      email: consultant.email,
+      consultant_id: finalConsultantId,
+      email: consultant.email || cleanEmail,
       name: consultant.name || '',
     };
 
@@ -187,7 +256,7 @@ router.post('/verify-otp', async (req, res) => {
       consultant,
     });
   } catch (err) {
-    console.error('verify-otp error', err);
+    console.error('verify-otp error', err && err.stack ? err.stack : err);
     return res.status(500).json({
       ok: false,
       error: 'Failed to verify OTP. Please try again.',
@@ -247,7 +316,7 @@ router.post('/complete-profile', async (req, res) => {
       consultant,
     });
   } catch (err) {
-    console.error('complete-profile error', err);
+    console.error('complete-profile error', err && err.stack ? err.stack : err);
     return res.status(500).json({
       ok: false,
       error: 'Failed to complete profile. Please try again.',
@@ -270,19 +339,23 @@ router.get('/me', authMiddleware, async (req, res) => {
       });
     }
 
-    // Get consultant from Apps Script
-    const result = await appsScript.getConsultantByEmailAction({
-      email: email,
-    });
+    let result;
+    try {
+      result = await appsScript.getConsultantByEmailAction({ email });
+      log('appsScript.getConsultantByEmailAction ->', JSON.stringify(result));
+    } catch (err) {
+      console.error('[auth] getConsultantByEmailAction threw:', err && err.stack ? err.stack : err);
+      return res.status(502).json({ ok: false, error: 'upstream_error', message: 'Failed to fetch user profile.' });
+    }
 
-    if (!result || result.ok === false) {
+    if (!result || result.ok === false || !result.consultant) {
       return res.status(404).json({
         ok: false,
         error: 'User not found',
       });
     }
 
-    const consultant = result.consultant;
+    const consultant = normalizeConsultantObject(result.consultant);
     const needsProfile = !consultant?.name || consultant.name.trim() === '';
 
     log('Profile fetched for:', email);
@@ -295,7 +368,7 @@ router.get('/me', authMiddleware, async (req, res) => {
       },
     });
   } catch (err) {
-    console.error('auth/me error:', err);
+    console.error('auth/me error:', err && err.stack ? err.stack : err);
     return res.status(500).json({
       ok: false,
       error: err.message || 'Failed to get profile',

@@ -1,181 +1,247 @@
 
-// const BASE = import.meta.env.VITE_API_BASE || 'http://localhost:4000/api';
-
-// async function rawFetch(path, opts = {}) {
-//   const url = `${BASE}${path}`;
-//   const res = await fetch(url, opts);
-//   const text = await res.text();
-//   let json = {};
-//   try { 
-//     json = text ? JSON.parse(text) : {}; 
-//   } catch(e) {
-//     throw new Error(`Invalid JSON from ${url}: ${text}`);
-//   }
-//   if (!res.ok) {
-//     const errMsg = json?.error || json?.message || `HTTP ${res.status}`;
-//     throw new Error(errMsg);
-//   }
-//   return json;
-// }
-
-// export async function getTeam() {
-//   const res = await rawFetch('/team');
-//   return res.team || [];
-// }
-
-// export async function getProject(code) {
-//   const res = await rawFetch(`/projects/${encodeURIComponent(code)}`);
-//   return res.project;
-// }
-
-// export async function getClient(code) {
-//   const res = await rawFetch(`/clients/${encodeURIComponent(code)}`);
-//   return res.client;
-// }
-
-// export async function createInvoice(payload) {
-//   const res = await rawFetch('/invoices', {
-//     method: 'POST',
-//     headers: { 'Content-Type': 'application/json' },
-//     body: JSON.stringify(payload)
-//   });
-//   return res;
-// }
-
-// export async function saveInvoice(payload) {
-//   // Alias for createInvoice
-//   return createInvoice(payload);
-// }
-
-// export async function sendInvoiceEmail({ invoiceId, toEmail }) {
-//   const res = await rawFetch('/invoices/send', {
-//     method: 'POST',
-//     headers: { 'Content-Type': 'application/json' },
-//     body: JSON.stringify({ invoiceId, toEmail })
-//   });
-//   return res;
-// }
-
-// // Legacy aliases for backward compatibility
-// export const fetchProject = getProject;
-// export const fetchClient = getClient;
-// export const fetchTeam = getTeam;
 // src/api/api.js
-
-// src/api/api.js
-// Central API helper for auth + invoice endpoints
-
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:4000/api';
 
 // ---------- Generic helpers ----------
-async function apiGet(path) {
+async function apiGet(path, requireAuth = false) {
+  const headers = {};
+  if (requireAuth) {
+    const token = localStorage.getItem('authToken');
+    if (!token) throw new Error('No authentication token found');
+    headers['Authorization'] = `Bearer ${token}`;
+  }
   const resp = await fetch(`${API_BASE}${path}`, {
     credentials: 'include',
+    headers,
   });
 
-  if (!resp.ok) {
-    const text = await resp.text();
+  const text = await resp.text();
+  let data;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch (e) {
     throw new Error(text || `GET ${path} failed with ${resp.status}`);
   }
-  return resp.json();
+
+  if (!resp.ok) {
+    throw new Error(data.message || data.error || `GET ${path} failed with ${resp.status}`);
+  }
+  return data;
 }
 
-async function apiPost(path, body) {
+async function apiPost(path, body = {}, requireAuth = false) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (requireAuth) {
+    const token = localStorage.getItem('authToken');
+    if (!token) throw new Error('No authentication token found');
+    headers['Authorization'] = `Bearer ${token}`;
+  }
   const resp = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers,
     credentials: 'include',
     body: JSON.stringify(body || {}),
   });
 
-  if (!resp.ok) {
-    const text = await resp.text();
+  const text = await resp.text();
+  let data;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch (e) {
     throw new Error(text || `POST ${path} failed with ${resp.status}`);
   }
-  return resp.json();
+
+  if (!resp.ok) {
+    throw new Error(data.message || data.error || `POST ${path} failed with ${resp.status}`);
+  }
+  return data;
 }
 
 // ===================== AUTH APIs =====================
-
-// Start login: send OTP to email
 export async function startLogin(email) {
   if (!email) throw new Error('Email is required');
   return apiPost('/auth/start-login', { email });
 }
 
-// Verify OTP
 export async function verifyOtp({ email, otp }) {
   if (!email || !otp) throw new Error('Email and OTP are required');
   return apiPost('/auth/verify-otp', { email, otp });
 }
 
-// Get logged-in user profile
-// src/api/api.js
-
-// Get logged-in user profile
 export async function getProfile() {
-  const token = localStorage.getItem('authToken');
-  
-  if (!token) {
-    throw new Error('No authentication token found');
-  }
-  
-  try {
-    const response = await fetch(`${API_BASE}/auth/me`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      credentials: 'include',
-    });
-
-    const data = await response.json();
-    
-    if (!response.ok) {
-      throw new Error(data.message || data.error || 'Failed to get profile');
-    }
-
-    return data;
-  } catch (error) {
-    console.error('❌ getProfile error:', error);
-    throw error;
-  }
+  return apiGet('/auth/me', true);
 }
 
-// Update profile (name, etc.)
 export async function updateProfile(profile) {
-  return apiPost('/auth/update-profile', profile);
+  return apiPost('/auth/complete-profile', profile, true);
 }
 
-// Logout
 export async function logout() {
-  return apiPost('/auth/logout', {});
+  return apiPost('/auth/logout', {}, true);
 }
 
 // ===================== INVOICE / SHEETS APIs =====================
 
-// Team members sheet
 export async function getTeam() {
-  return apiGet('/team');
+  return apiGet('/team', true);
 }
 
-// Project sheet by project code
 export async function getProject(projectCode) {
   if (!projectCode) throw new Error('Project code is required');
-  return apiGet(`/projects/${encodeURIComponent(projectCode)}`);
+  return apiGet(`/projects/${encodeURIComponent(projectCode)}`, true);
 }
 
-// Client sheet by client code
 export async function getClient(clientCode) {
   if (!clientCode) throw new Error('Client code is required');
-  return apiGet(`/clients/${encodeURIComponent(clientCode)}`);
+  return apiGet(`/clients/${encodeURIComponent(clientCode)}`, true);
 }
 
-// Invoice by ID (for loading drafts)
 export async function getInvoiceById(invoiceId) {
   if (!invoiceId) throw new Error('Invoice ID is required');
-  return apiGet(`/invoices/${encodeURIComponent(invoiceId)}`);
+  return apiGet(`/invoices/${encodeURIComponent(invoiceId)}`, true);
 }
+
+// ===================== DASHBOARD =====================
+
+/**
+ * Get dashboard summary for logged-in consultant.
+ * Uses Authorization header (token stored in localStorage.authToken).
+ */
+export async function getDashboardSummary() {
+  // Calls backend: GET /api/dashboard/summary
+  return apiGet('/dashboard/summary', true);
+}
+// src/api/api.js
+// const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:4000/api';
+// const DEV_CONSULTANT_ID = import.meta.env.VITE_DEV_CONSULTANT_ID || ''; // set in .env for local dev, e.g. CONS_001
+
+// // ---------- Generic helpers ----------
+// async function apiGet(path, opts = { requireAuth: false, devConsultantId: null }) {
+//   const { requireAuth = false, devConsultantId = null } = opts || {};
+//   const headers = {};
+
+//   if (requireAuth) {
+//     const token = localStorage.getItem('authToken');
+//     if (!token) {
+//       // if we are in dev and a dev consultant id is provided, send it as header
+//       const fallback = devConsultantId || DEV_CONSULTANT_ID;
+//       if (!fallback) throw new Error('No authentication token found');
+//       headers['x-consultant-id'] = fallback;
+//     } else {
+//       headers['Authorization'] = `Bearer ${localStorage.getItem('authToken')}`;
+//     }
+//   }
+
+//   const resp = await fetch(`${API_BASE}${path}`, {
+//     credentials: 'include',
+//     headers,
+//   });
+
+//   const text = await resp.text();
+//   let data;
+//   try {
+//     data = text ? JSON.parse(text) : {};
+//   } catch (e) {
+//     throw new Error(text || `GET ${path} failed with ${resp.status}`);
+//   }
+
+//   if (!resp.ok) {
+//     // standardize error message
+//     const msg = data.message || data.error || `GET ${path} failed with ${resp.status}`;
+//     throw new Error(msg);
+//   }
+//   return data;
+// }
+
+// async function apiPost(path, body = {}, opts = { requireAuth: false, devConsultantId: null }) {
+//   const { requireAuth = false, devConsultantId = null } = opts || {};
+//   const headers = { 'Content-Type': 'application/json' };
+
+//   if (requireAuth) {
+//     const token = localStorage.getItem('authToken');
+//     if (!token) {
+//       const fallback = devConsultantId || DEV_CONSULTANT_ID;
+//       if (!fallback) throw new Error('No authentication token found');
+//       headers['x-consultant-id'] = fallback;
+//     } else {
+//       headers['Authorization'] = `Bearer ${localStorage.getItem('authToken')}`;
+//     }
+//   }
+
+//   const resp = await fetch(`${API_BASE}${path}`, {
+//     method: 'POST',
+//     headers,
+//     credentials: 'include',
+//     body: JSON.stringify(body || {}),
+//   });
+
+//   const text = await resp.text();
+//   let data;
+//   try {
+//     data = text ? JSON.parse(text) : {};
+//   } catch (e) {
+//     throw new Error(text || `POST ${path} failed with ${resp.status}`);
+//   }
+
+//   if (!resp.ok) {
+//     const msg = data.message || data.error || `POST ${path} failed with ${resp.status}`;
+//     throw new Error(msg);
+//   }
+//   return data;
+// }
+
+// // ===================== AUTH APIs =====================
+// export async function startLogin(email) {
+//   if (!email) throw new Error('Email is required');
+//   return apiPost('/auth/start-login', { email });
+// }
+
+// export async function verifyOtp({ email, otp }) {
+//   if (!email || !otp) throw new Error('Email and OTP are required');
+//   return apiPost('/auth/verify-otp', { email, otp });
+// }
+
+// export async function getProfile() {
+//   return apiGet('/auth/me', { requireAuth: true });
+// }
+
+// export async function updateProfile(profile) {
+//   return apiPost('/auth/complete-profile', profile, { requireAuth: true });
+// }
+
+// export async function logout() {
+//   return apiPost('/auth/logout', {}, { requireAuth: true });
+// }
+
+// // ===================== INVOICE / SHEETS APIs =====================
+
+// export async function getTeam() {
+//   return apiGet('/team', { requireAuth: true });
+// }
+
+// export async function getProject(projectCode) {
+//   if (!projectCode) throw new Error('Project code is required');
+//   return apiGet(`/projects/${encodeURIComponent(projectCode)}`, { requireAuth: true });
+// }
+
+// export async function getClient(clientCode) {
+//   if (!clientCode) throw new Error('Client code is required');
+//   return apiGet(`/clients/${encodeURIComponent(clientCode)}`, { requireAuth: true });
+// }
+
+// export async function getInvoiceById(invoiceId) {
+//   if (!invoiceId) throw new Error('Invoice ID is required');
+//   return apiGet(`/invoices/${encodeURIComponent(invoiceId)}`, { requireAuth: true });
+// }
+
+// // ===================== DASHBOARD =====================
+
+// /**
+//  * Get dashboard summary for logged-in consultant.
+//  * Uses Authorization header (token stored in localStorage.authToken).
+//  *
+//  * If token absent and VITE_DEV_CONSULTANT_ID env var is set, it will use that as x-consultant-id header.
+//  */
+// export async function getDashboardSummary() {
+//   return apiGet('/dashboard/summary', { requireAuth: true });
+// }

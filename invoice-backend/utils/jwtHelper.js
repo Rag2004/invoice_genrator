@@ -1,3 +1,4 @@
+// utils/jwtHelper.js
 const jwt = require('jsonwebtoken');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
@@ -5,26 +6,44 @@ const JWT_EXPIRY = process.env.JWT_EXPIRY || '7d';
 
 /**
  * Generate JWT token for user (main function)
- * @param {object} payload - User data { sub, email, name }
- * @returns {string} - JWT token
+ * Accepts payload that may include:
+ * - consultant_id (preferred)
+ * - sub (fallback)
+ * - email, name, role
+ *
+ * Token will include:
+ * - sub (string) -> consultant_id or payload.sub
+ * - consultant_id (explicit claim)
+ * - email, name, role, type
  */
-function generateToken(payload) {
+function generateToken(payload = {}) {
   try {
-    const token = jwt.sign(
-      {
-        sub: payload.sub,
-        email: payload.email,
-        name: payload.name,
-        role: payload.role || 'consultant',
-        type: 'access',
-      },
-      JWT_SECRET,
-      {
-        expiresIn: JWT_EXPIRY,
-        issuer: 'invoice-generator',
-        audience: 'invoice-app',
-      }
-    );
+    // Prefer consultant_id, otherwise fallback to sub
+    const consultantId = payload.consultant_id || payload.consultantId || payload.sub || payload.id || null;
+
+    const claims = {
+      // keep backward-compatible fields
+      sub: consultantId || undefined,
+      consultant_id: consultantId || undefined,
+
+      // user-visible fields
+      email: payload.email || undefined,
+      name: payload.name || undefined,
+      role: payload.role || 'consultant',
+      type: payload.type || 'access',
+    };
+
+    // Remove undefined keys to keep token compact
+    const finalClaims = {};
+    Object.keys(claims).forEach(k => {
+      if (claims[k] !== undefined) finalClaims[k] = claims[k];
+    });
+
+    const token = jwt.sign(finalClaims, JWT_SECRET, {
+      expiresIn: JWT_EXPIRY,
+      issuer: 'invoice-generator',
+      audience: 'invoice-app',
+    });
     return token;
   } catch (error) {
     console.error('Error generating token:', error);
@@ -96,7 +115,7 @@ function getTokenExpiry(token) {
 }
 
 module.exports = {
-  signToken,        // <-- required by your /verify-otp route
+  signToken,
   generateToken,
   verifyToken,
   decodeToken,

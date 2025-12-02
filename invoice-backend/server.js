@@ -1,4 +1,80 @@
 
+// // server.js
+// require('dotenv').config();
+// const express = require('express');
+// const bodyParser = require('body-parser');
+// const cors = require('cors');
+// const logger = require('./utils/logger');
+
+// const routes = require('./routes');
+// const modesRouter = require('./routes/modes');
+// const invoicesRouter = require('./routes/invoices');   // existing
+// const authRouter = require('./routes/auth');     
+// const dashboardRoutes = require('./routes/dashboard');
+//       // 👈 NEW
+
+// const app = express();
+// const port = process.env.PORT || 4000;
+
+// // -------------------- CORS CONFIG --------------------
+// const FRONTEND_ORIGIN =
+//   process.env.FRONTEND_ORIGIN || 'http://localhost:5173';
+
+// const corsOptions = {
+//   origin: FRONTEND_ORIGIN,
+//   credentials: true, // allow cookies / auth headers
+//   methods: ['GET', 'POST', 'OPTIONS'],
+//   allowedHeaders: ['Content-Type', 'Authorization'],
+// };
+
+// // Apply CORS for all routes
+// app.use(cors(corsOptions));
+
+// // Explicitly handle preflight
+// app.options('*', cors(corsOptions));
+
+// // -------------------- MIDDLEWARE ---------------------
+// app.use(bodyParser.json({ limit: '1mb' }));
+
+// // -------------------- ROUTES -------------------------
+// // health
+// app.get('/health', (req, res) =>
+//   res.json({ ok: true, env: process.env.NODE_ENV || 'dev' })
+// );
+
+// // mount API routes
+// app.use('/api', routes);
+// app.use('/api/modes', modesRouter);
+// app.use('/api/invoices', invoicesRouter);
+// app.use('/api/auth', authRouter); // auth routes (start-login, verify-otp, etc.)
+// app.use('/api/dashboard', dashboardRoutes);
+
+// // admin route example (protected)
+// app.post('/api/admin/reset-stub', (req, res) => {
+//   const key = req.headers['x-api-key'] || req.query.apiKey;
+//   if (key !== (process.env.ADMIN_API_KEY || '')) {
+//     return res.status(401).json({ error: 'unauthorized' });
+//   }
+//   const apps = require('./lib/appsScriptClient');
+//   if (apps.mode !== 'stub')
+//     return res.status(400).json({ error: 'not available' });
+//   apps.memory = null;
+//   return res.json({ ok: true });
+// });
+
+// // -------------------- ERROR HANDLER ------------------
+// app.use((err, req, res, next) => {
+//   logger.error(err);
+//   res.status(500).json({ error: 'internal server error' });
+// });
+
+// // -------------------- START SERVER -------------------
+// app.listen(port, () => {
+//   logger.info(`Invoice backend listening on port ${port}`);
+//   logger.info(`APPS_SCRIPT_URL set: ${Boolean(process.env.APPS_SCRIPT_URL)}`);
+// });
+
+// console.log('🟢 Server restarted. Loading invoices router...');
 // server.js
 require('dotenv').config();
 const express = require('express');
@@ -6,60 +82,54 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const logger = require('./utils/logger');
 
-const routes = require('./routes');
+const routes = require('./routes'); // if you have a combined routes index
 const modesRouter = require('./routes/modes');
-const invoicesRouter = require('./routes/invoices');   // existing
-const authRouter = require('./routes/auth');     
+const invoicesRouter = require('./routes/invoices');
+const authRouter = require('./routes/auth');
 const dashboardRoutes = require('./routes/dashboard');
-      // 👈 NEW
 
 const app = express();
 const port = process.env.PORT || 4000;
 
 // -------------------- CORS CONFIG --------------------
-const FRONTEND_ORIGIN =
-  process.env.FRONTEND_ORIGIN || 'http://localhost:5173';
-
+const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:5173';
 const corsOptions = {
   origin: FRONTEND_ORIGIN,
-  credentials: true, // allow cookies / auth headers
+  credentials: true,
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-consultant-id'],
 };
 
-// Apply CORS for all routes
 app.use(cors(corsOptions));
-
-// Explicitly handle preflight
 app.options('*', cors(corsOptions));
-
-// -------------------- MIDDLEWARE ---------------------
 app.use(bodyParser.json({ limit: '1mb' }));
 
 // -------------------- ROUTES -------------------------
-// health
-app.get('/health', (req, res) =>
-  res.json({ ok: true, env: process.env.NODE_ENV || 'dev' })
-);
+app.get('/health', (req, res) => res.json({ ok: true, env: process.env.NODE_ENV || 'dev', now: new Date().toISOString() }));
 
-// mount API routes
-app.use('/api', routes);
+// mount your API routes (adjust per your project)
+if (routes) app.use('/api', routes);
 app.use('/api/modes', modesRouter);
 app.use('/api/invoices', invoicesRouter);
-app.use('/api/auth', authRouter); // auth routes (start-login, verify-otp, etc.)
+app.use('/api/auth', authRouter);
 app.use('/api/dashboard', dashboardRoutes);
 
-// admin route example (protected)
+// admin / debug endpoint to reset stub memory if using stub mode
 app.post('/api/admin/reset-stub', (req, res) => {
   const key = req.headers['x-api-key'] || req.query.apiKey;
-  if (key !== (process.env.ADMIN_API_KEY || '')) {
-    return res.status(401).json({ error: 'unauthorized' });
+  if (key !== (process.env.ADMIN_API_KEY || '')) return res.status(401).json({ error: 'unauthorized' });
+  try {
+    const apps = require('./lib/appsScriptClient');
+    if (apps.mode !== 'stub') return res.status(400).json({ error: 'not available' });
+    if (apps._memory) {
+      apps._memory.invoices = [];
+      apps._memory.consultants = new Map();
+      apps._memory.otpSessions = new Map();
+    }
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
   }
-  const apps = require('./lib/appsScriptClient');
-  if (apps.mode !== 'stub')
-    return res.status(400).json({ error: 'not available' });
-  apps.memory = null;
-  return res.json({ ok: true });
 });
 
 // -------------------- ERROR HANDLER ------------------
@@ -74,4 +144,4 @@ app.listen(port, () => {
   logger.info(`APPS_SCRIPT_URL set: ${Boolean(process.env.APPS_SCRIPT_URL)}`);
 });
 
-console.log('🟢 Server restarted. Loading invoices router...');
+console.log('🟢 Server started.');
