@@ -1,0 +1,1 @@
+export const LOGO_URL = `${window.location.origin}/logo.png`;

@@ -1,0 +1,202 @@
+/* ===============================
+   Page container
+   =============================== */
+
+.login-page {
+  min-height: 100vh;
+  background: #f7f9fc;
+  display: flex;
+  flex-direction: column;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, Helvetica, Arial, sans-serif;
+  color: #0f172a;
+}
+
+/* ===============================
+   Header (logo top-left)
+   =============================== */
+
+.login-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  padding: 0 32px;
+  z-index: 10;
+}
+
+.login-logo-small {
+  height: 32px;
+  width: auto;
+}
+
+/* ===============================
+   Main layout (FULL CENTER)
+   =============================== */
+
+.login-main {
+  flex: 1;
+  display: flex;
+  align-items: center;        /* vertical center */
+  justify-content: center;    /* horizontal center */
+  padding: 32px;
+}
+
+/* ===============================
+   Login card
+   =============================== */
+
+.login-card {
+  width: 100%;
+  max-width: 420px;
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 32px;
+  box-shadow:
+    0 10px 25px rgba(15, 23, 42, 0.08),
+    0 2px 8px rgba(15, 23, 42, 0.05);
+}
+
+/* ===============================
+   Typography
+   =============================== */
+
+.login-title {
+  font-size: 28px;
+  font-weight: 700;
+  margin: 0 0 8px 0;
+}
+
+.login-subtitle {
+  font-size: 14px;
+  color: #475569;
+  margin-bottom: 24px;
+}
+
+/* ===============================
+   Form
+   =============================== */
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.login-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #334155;
+}
+
+/* ===============================
+   Input
+   =============================== */
+
+.login-input {
+  height: 44px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid #cbd5e1;
+  font-size: 14px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.login-input::placeholder {
+  color: #94a3b8;
+}
+
+.login-input:focus {
+  outline: none;
+  border-color: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.15);
+}
+
+.login-input:disabled {
+  background: #f1f5f9;
+  cursor: not-allowed;
+}
+
+/* ===============================
+   Error
+   =============================== */
+
+.login-error {
+  font-size: 13px;
+  color: #dc2626;
+}
+
+/* ===============================
+   Button
+   =============================== */
+
+.login-button {
+  height: 46px;
+  margin-top: 8px;
+  border-radius: 999px;
+  border: none;
+  background: #22c55e;
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.1s ease;
+}
+
+.login-button:hover:not(:disabled) {
+  background: #16a34a;
+}
+
+.login-button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.login-button:disabled {
+  background: #86efac;
+  cursor: not-allowed;
+}
+
+/* ===============================
+   Helper text
+   =============================== */
+
+.login-help {
+  font-size: 13px;
+  color: #64748b;
+  margin-top: 12px;
+  line-height: 1.4;
+}
+
+/* ===============================
+   Mobile responsive
+   =============================== */
+
+@media (max-width: 480px) {
+  .login-header {
+    padding: 0 20px;
+  }
+
+  .login-card {
+    padding: 24px;
+  }
+
+  .login-title {
+    font-size: 24px;
+  }
+}
+.login-page {
+  position: fixed;
+  inset: 0; /* top right bottom left = 0 */
+  background: #f7f9fc;
+
+  display: flex;
+  flex-direction: column;
+
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, Helvetica, Arial, sans-serif;
+  color: #0f172a;
+
+  z-index: 9999; /* sit above everything */
+}
