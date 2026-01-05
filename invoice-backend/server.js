@@ -12,22 +12,36 @@ const app = express();
 const port = process.env.PORT || 4000;
 
 // -------------------- CORS CONFIG (FIXED) --------------------
-const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:5174';
+// -------------------- CORS CONFIG (PRODUCTION SAFE) --------------------
+
+const allowedOrigins = [
+  'http://localhost:5174', // local dev
+  'https://earnest-acceptance-production-b2de.up.railway.app', // frontend
+];
 
 const corsOptions = {
-  origin: FRONTEND_ORIGIN,
+  origin: function (origin, callback) {
+    // Allow server-to-server & health checks
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    console.error('❌ Blocked by CORS:', origin);
+    return callback(new Error('Not allowed by CORS'));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: [
-    'Content-Type', 
-    'Authorization', 
-    'x-consultant-id',
+    'Content-Type',
+    'Authorization',
+    'X-Consultant-Id',
     'X-Requested-With',
-    'Accept'
+    'Accept',
   ],
-  exposedHeaders: ['Content-Range', 'X-Content-Range'],
-  maxAge: 86400, // 24 hours
 };
+
 
 // ✅ Apply CORS middleware BEFORE routes
 app.use(cors(corsOptions));
