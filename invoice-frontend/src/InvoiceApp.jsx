@@ -303,7 +303,7 @@ export default function Invoice() {
      PROJECT LOOKUP (for new invoices only)
   ============================================================================ */
 
-  useEffect(() => {
+useEffect(() => {
     if (!debouncedProjectCode) return;
     if (loadingDraft) return;
     if (invoiceId) return;  // ✅ Skip if editing existing draft
@@ -314,17 +314,19 @@ export default function Invoice() {
       .then((res) => {
         if (!res?.ok) return;
 
+        // ✅ Store raw API data
         setProjectData(res.project);
         setClientData(res.client);
         setConsultantData(res.consultant);
 
+        // ✅ Map backend field names to frontend state
         updateInvoice((prev) => ({
           ...prev,
           clientCode: res.project.clientCode,
           consultantId: res.project.consultantId,
           consultantName: res.consultant?.Consultant_name || "",
           consultantEmail: res.consultant?.email || "",
-          consultantStatus: res.consultant?.status || "",
+          consultantStatus: res.consultant?.status || "active",
           clientName: res.client?.Client_name || "",
           businessName: res.client?.Buisness_Name || "",
           billingAddress: res.client?.Billing_Address || "",
@@ -550,26 +552,27 @@ export default function Invoice() {
       },
       
       consultant: {
-        id: invoice.consultantId,
-        name: invoice.consultantName,
-        email: consultantData?.email || invoice.consultantEmail || '',
-        businessName: consultantData?.Consultant_name || invoice.consultantName,
-        registeredOffice: consultantData?.Registered_Office || '',
-        pan: consultantData?.PAN || '',
-        gstin: consultantData?.GSTIN || '',
-        cin: consultantData?.CIN || '',
-        stateCode: consultantData?.State || ''
-      },
+  id: invoice.consultantId,
+  name: invoice.consultantName,
+  email: consultantData?.email || invoice.consultantEmail || '',
+  businessName: consultantData?.business_name || consultantData?.Consultant_name || invoice.consultantName,
+  registeredOffice: consultantData?.business_registered_office || '',
+  pan: consultantData?.business_pan || '',
+  gstin: consultantData?.business_gstin || '',
+  cin: consultantData?.business_cin || '',
+  stateCode: consultantData?.business_state_code || '',
+  hourlyRate: invoice.baseHourlyRate  // ✅ ADD THIS
+},
       
       client: {
-        code: invoice.clientCode,
-        name: clientData?.Client_name || invoice.clientName || '',
-        businessName: clientData?.Buisness_Name || invoice.businessName || '',
-        billingAddress: invoice.billingAddress || clientData?.Billing_Address || '',
-        pan: clientData?.PAN || '',
-        gstin: clientData?.GSTIN || '',
-        stateCode: clientData?.State || ''
-      },
+  code: invoice.clientCode,
+  name: clientData?.Client_name || invoice.clientName || '',
+  businessName: clientData?.Buisness_Name || invoice.businessName || '',
+  billingAddress: invoice.billingAddress || clientData?.Billing_Address || '',
+  pan: clientData?.Client_PAN || '',     // ✅ Changed from PAN
+  gstin: clientData?.Client_GST || '',   // ✅ Changed from GSTIN
+  stateCode: clientData?.State || ''
+},
       
       serviceProvider: {
         name: "Hourly Ventures LLP",
@@ -1045,23 +1048,24 @@ export default function Invoice() {
           id: invoice.consultantId,
           name: invoice.consultantName,
           email: consultantData?.email || invoice.consultantEmail || '',
-          businessName: consultantData?.Consultant_name || invoice.consultantName,
-          registeredOffice: consultantData?.Registered_Office || '',
-          pan: consultantData?.PAN || '',
-          gstin: consultantData?.GSTIN || '',
-          cin: consultantData?.CIN || '',
-          stateCode: consultantData?.State || ''
+          businessName: consultantData?.business_name || consultantData?.Consultant_name || invoice.consultantName,
+          registeredOffice: consultantData?.business_registered_office || '',
+          pan: consultantData?.business_pan || '',
+          gstin: consultantData?.business_gstin || '',
+          cin: consultantData?.business_cin || '',
+          stateCode: consultantData?.business_state_code || '',
+          hourlyRate: invoice.baseHourlyRate  // ✅ CRITICAL: Add this line
         },
         
         client: {
-          code: invoice.clientCode,
-          name: clientData?.Client_name || invoice.clientName || '',
-          businessName: clientData?.Buisness_Name || invoice.businessName || '',
-          billingAddress: invoice.billingAddress || clientData?.Billing_Address || '',
-          pan: clientData?.PAN || '',
-          gstin: clientData?.GSTIN || '',
-          stateCode: clientData?.State || ''
-        },
+  code: invoice.clientCode,
+  name: clientData?.Client_name || invoice.clientName || '',
+  businessName: clientData?.Buisness_Name || invoice.businessName || '',
+  billingAddress: invoice.billingAddress || clientData?.Billing_Address || '',
+  pan: clientData?.Client_PAN || '',     // ✅ Correct field name
+  gstin: clientData?.Client_GST || '',   // ✅ Correct field name
+  stateCode: clientData?.State || ''
+},
         
         serviceProvider: {
           name: "Hourly Ventures LLP",

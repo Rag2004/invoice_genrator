@@ -61,29 +61,29 @@ export function buildInvoiceSnapshot(invoice, projectData, clientData, consultan
   const hourlyRate = firstItem?.rate || invoice.baseHourlyRate || 0;
   
   const consultant = {
-    id: invoice.consultantId || '',
-    name: invoice.consultantName || consultantData?.Consultant_name || '',
-    email: invoice.consultantEmail || consultantData?.email || '',
-    businessName: consultantData?.Consultant_name || invoice.consultantName || '',
-    registeredOffice: consultantData?.Registered_Office || '',
-    pan: consultantData?.PAN || '',
-    gstin: consultantData?.GSTIN || '',
-    stateCode: consultantData?.State || '',
-    hourlyRate: hourlyRate  // ✅ Add hourly rate to consultant
-  };
-
+  id: invoice.consultantId || '',
+  name: invoice.consultantName || consultantData?.Consultant_name || '',
+  email: invoice.consultantEmail || consultantData?.email || '',
+  businessName: consultantData?.business_name || consultantData?.Consultant_name || invoice.consultantName || '',
+  registeredOffice: consultantData?.business_registered_office || '',
+  pan: consultantData?.business_pan || '',
+  gstin: consultantData?.business_gstin || '',
+  cin: consultantData?.business_cin || '',
+  stateCode: consultantData?.business_state_code || '',
+  hourlyRate: hourlyRate
+};
   // ============================================================================
   // CLIENT
   // ============================================================================
   const client = {
-    code: invoice.clientCode || clientData?.Client_Code || '',
-    name: invoice.clientName || clientData?.Client_name || '',
-    businessName: invoice.businessName || clientData?.Buisness_Name || '',
-    billingAddress: invoice.billingAddress || clientData?.Billing_Address || '',
-    pan: clientData?.PAN || '',
-    gstin: clientData?.GSTIN || '',
-    stateCode: clientData?.State || ''
-  };
+  code: invoice.clientCode || clientData?.Client_Code || '',
+  name: invoice.clientName || clientData?.Client_name || '',
+  businessName: invoice.businessName || clientData?.Buisness_Name || '',
+  billingAddress: invoice.billingAddress || clientData?.Billing_Address || '',
+  pan: clientData?.Client_PAN || '',
+  gstin: clientData?.Client_GST || '',
+  stateCode: clientData?.State || ''
+};
 
   // ============================================================================
   // SERVICE PROVIDER (HARDCODED CONSTANTS)
