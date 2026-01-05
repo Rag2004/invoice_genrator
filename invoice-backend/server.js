@@ -15,8 +15,7 @@ const port = process.env.PORT || 4000;
 // -------------------- CORS CONFIG (PRODUCTION SAFE) --------------------
 const allowedOrigins = [
   'http://localhost:5174',
-  'https://earnest-acceptance-production-b2de.up.railway.app',
-  'https://focused-strength-production-b2de.up.railway.app',
+  'https://earnest-acceptance-production-b2de.up.railway.app'
 ];
 
 const corsOptions = {
