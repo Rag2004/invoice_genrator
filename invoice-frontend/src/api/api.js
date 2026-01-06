@@ -135,7 +135,7 @@ async function apiPost(path, body = {}, requireAuth = false, timeout = DEFAULT_T
 
 export async function startLogin(email) {
   if (!email) throw new Error('Email is required');
-  return apiPost('/auth/start-login', { email }, false, 25000);
+  return apiPost('/auth/start-login', { email }, false, 60000);
 }
 
 export async function verifyOtp({ email, otp }) {
