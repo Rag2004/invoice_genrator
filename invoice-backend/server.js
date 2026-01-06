@@ -10,6 +10,8 @@ const authMiddleware = require('./middleware/authMiddleware');
 
 const app = express();
 const port = process.env.PORT || 4000;
+const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:5174';
+
 
 // -------------------- CORS CONFIG (FIXED) --------------------
 // -------------------- CORS CONFIG (PRODUCTION SAFE) --------------------
@@ -44,11 +46,11 @@ app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
 
-// ✅ Apply CORS middleware BEFORE routes
-app.use(cors(corsOptions));
+// // ✅ Apply CORS middleware BEFORE routes
+// app.use(cors(corsOptions));
 
-// ✅ Handle preflight requests for ALL routes
-app.options('*', cors(corsOptions));
+// // ✅ Handle preflight requests for ALL routes
+// app.options('*', cors(corsOptions));
 
 // ✅ Body parser - INCREASED LIMIT for invoice HTML
 app.use(bodyParser.json({ limit: '5mb' }));
@@ -182,12 +184,10 @@ app.use((err, req, res, next) => {
 app.listen(port, () => {
   logger.info(`Invoice backend listening on port ${port}`);
   logger.info(`APPS_SCRIPT_URL set: ${Boolean(process.env.APPS_SCRIPT_URL)}`);
-  logger.info(`CORS enabled for: ${FRONTEND_ORIGIN}`);
+  logger.info({ allowedOrigins }, 'CORS enabled');
   
   console.log(`\n🚀 Server running at http://localhost:${port}`);
   console.log(`📧 Email: ${process.env.EMAIL_USER ? '✅ Configured' : '❌ Not configured'}`);
-  console.log(`🔗 CORS: ${FRONTEND_ORIGIN}`);
+  console.log(`🔗 CORS allowed origins:`, allowedOrigins);
   console.log(`\n📋 Route Test: http://localhost:${port}/api/invoices-test\n`);
 });
-
-console.log('🟢 Server started.');

@@ -1,5 +1,9 @@
 // src/api/api.js - FIXED VERSION
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:4000/api';
+const API_BASE =
+  import.meta.env.VITE_API_BASE ||
+  import.meta.env.VITE_API_URL ||
+  'http://localhost:4000/api';
+
 const DEFAULT_TIMEOUT = 20000;
 // const logger = require('../utils/logger');
 

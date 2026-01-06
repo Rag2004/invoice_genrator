@@ -87,29 +87,49 @@ async function requestWithRetry(url, opts = {}, retries = RETRIES) {
 // API COMMUNICATION
 // ============================================================================
 
-function buildUrlWithToken(action, params = {}) {
+// function buildUrlWithToken(action, params = {}) {
+//   const url = new URL(APPS_SCRIPT_URL);
+//   const p = new URLSearchParams(params);
+//   p.set('action', action);
+//   p.set('token', APPS_SCRIPT_TOKEN);
+//   url.search = p.toString();
+//   return url.toString();
+// }
+
+async function get(action, params = {}) {
   const url = new URL(APPS_SCRIPT_URL);
   const p = new URLSearchParams(params);
   p.set('action', action);
   p.set('token', APPS_SCRIPT_TOKEN);
   url.search = p.toString();
-  return url.toString();
+
+  return await requestWithRetry(url.toString(), {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${APPS_SCRIPT_TOKEN}`,
+    },
+  });
 }
 
-async function get(action, params = {}) {
-  const url = buildUrlWithToken(action, params);
-  return await requestWithRetry(url, { method: 'GET' });
-}
 
 async function post(action, data = {}) {
-  const url = `${APPS_SCRIPT_URL}?token=${encodeURIComponent(APPS_SCRIPT_TOKEN)}`;
-  const body = JSON.stringify({ action, data });
-  return await requestWithRetry(url, {
+  const body = JSON.stringify({
+  action,
+  token: APPS_SCRIPT_TOKEN,
+  data
+});
+
+
+  return await requestWithRetry(APPS_SCRIPT_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${APPS_SCRIPT_TOKEN}`,
+    },
     body,
   });
 }
+
 
 // ============================================================================
 // PROJECT / CLIENT / TEAM APIs
@@ -154,14 +174,29 @@ async function getInvoiceSetupAction(code) {
 
 async function startLogin(email) {
   const trimmed = String(email || '').trim().toLowerCase();
-  return post('startLogin', { email: trimmed, otpType: 'login' });
+
+  // Generate OTP in backend (you already do this)
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+  // 1. Store OTP in Apps Script
+  await storeOtpFromBackend({
+    email: trimmed,
+    otp,
+    otp_type: 'login'
+  });
+
+  // 2. Send email (already working)
+  return { ok: true };
 }
 
+
 async function verifyOtp(email, otp) {
-  const trimmedEmail = String(email || '').trim().toLowerCase();
-  const cleanOtp = String(otp || '').trim();
-  return post('verifyOtp', { email: trimmedEmail, otp: cleanOtp, otpType: 'login' });
+  return post('verifyOTP', {
+    email: String(email).trim().toLowerCase(),
+    otp: String(otp).trim()
+  });
 }
+
 
 async function completeProfile(payload) {
   const email = String(payload.email || '').trim().toLowerCase();
@@ -279,33 +314,33 @@ async function listDraftsByConsultant(consultantId) {
 //   const consultantId = params?.consultantId || params?.consultant_id || '';
 //   return listDraftsByConsultant(consultantId);
 // }
-async function listDraftsByConsultant(consultantId) {
-  if (!consultantId) {
-    logger.warn('listDraftsByConsultant called without consultantId');
-    return { ok: false, error: 'consultantId required', drafts: [] };
-  }
+// async function listDraftsByConsultant(consultantId) {
+//   if (!consultantId) {
+//     logger.warn('listDraftsByConsultant called without consultantId');
+//     return { ok: false, error: 'consultantId required', drafts: [] };
+//   }
   
-  try {
-    const result = await get('getAllDrafts', { consultantId });
+//   try {
+//     const result = await get('getAllDrafts', { consultantId });
     
-    if (!result) {
-      return { ok: false, error: 'No response', drafts: [] };
-    }
+//     if (!result) {
+//       return { ok: false, error: 'No response', drafts: [] };
+//     }
     
-    if (result.ok === true && Array.isArray(result.drafts)) {
-      return result;
-    }
+//     if (result.ok === true && Array.isArray(result.drafts)) {
+//       return result;
+//     }
     
-    if (Array.isArray(result)) {
-      return { ok: true, drafts: result };
-    }
+//     if (Array.isArray(result)) {
+//       return { ok: true, drafts: result };
+//     }
     
-    return { ok: true, drafts: [] };
-  } catch (err) {
-    logger.error({ err: err.message, consultantId }, 'listDraftsByConsultant failed');
-    return { ok: false, error: err.message, drafts: [] };
-  }
-}
+//     return { ok: true, drafts: [] };
+//   } catch (err) {
+//     logger.error({ err: err.message, consultantId }, 'listDraftsByConsultant failed');
+//     return { ok: false, error: err.message, drafts: [] };
+//   }
+// }
 async function getAllDrafts(params) {
   const consultantId = params?.consultantId || params?.consultant_id || '';
   return listDraftsByConsultant(consultantId);
