@@ -175,19 +175,27 @@ async function getInvoiceSetupAction(code) {
 async function startLogin(email) {
   const trimmed = String(email || '').trim().toLowerCase();
 
-  // Generate OTP in backend (you already do this)
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-  // 1. Store OTP in Apps Script
-  await storeOtpFromBackend({
-    email: trimmed,
-    otp,
-    otp_type: 'login'
+  // 🔥 Respond immediately
+  setImmediate(async () => {
+    try {
+      await storeOtpFromBackend({
+        email: trimmed,
+        otp,
+        otp_type: 'login'
+      });
+
+      logger.info({ email: trimmed }, 'OTP stored successfully');
+    } catch (err) {
+      logger.error({ err: err.message, email: trimmed }, 'OTP storage failed');
+    }
   });
 
-  // 2. Send email (already working)
+  // ✅ frontend gets response instantly
   return { ok: true };
 }
+
 
 
 async function verifyOtp(email, otp) {
