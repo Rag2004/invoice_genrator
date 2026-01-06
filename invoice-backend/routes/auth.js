@@ -64,101 +64,72 @@ function normalizeConsultantObject(raw) {
  * POST /api/auth/start-login
  * Body: { email }
  */
-router.post('/start-login', async (req, res) => {
-  try {
-    const { email } = req.body || {};
-    const { valid, error, email: cleanEmail } = validateEmail(email);
+router.post('/start-login', (req, res) => {
+  const { email } = req.body || {};
+  const { valid, error, email: cleanEmail } = validateEmail(email);
 
-    if (!valid) {
-      return res.status(400).json({ ok: false, error });
-    }
+  if (!valid) {
+    return res.status(400).json({ ok: false, error });
+  }
 
-    const otpLength = parseInt(process.env.OTP_LENGTH, 10) || 6;
-    const otpType = 'login';
+  // ✅ RESPOND IMMEDIATELY (NO AWAIT, NO BLOCKING)
+  res.json({
+    ok: true,
+    email: cleanEmail,
+    message: 'If the email exists, an OTP will be sent.',
+  });
 
-    log('Starting login for:', cleanEmail);
-
-    // 1. Generate OTP
-    const generatedOTP = Math.floor(100000 + Math.random() * 900000).toString();
-    log('Generated OTP:', generatedOTP);
-
-    // 2. Calculate expiry time
-    const expiryMinutes = parseInt(process.env.OTP_EXPIRY_MINUTES, 10) || 10;
-    const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000).toISOString();
-
-    // 3. Store OTP in Apps Script
-    let storeResult;
+  // 🔥 FIRE-AND-FORGET BACKGROUND WORK
+  setImmediate(async () => {
     try {
-      storeResult = await appsScript.storeOtpFromBackend({
+      log('Starting login (background) for:', cleanEmail);
+
+      const otpType = 'login';
+      const generatedOTP = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiryMinutes = parseInt(process.env.OTP_EXPIRY_MINUTES, 10) || 10;
+      const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000).toISOString();
+
+      // 1️⃣ Store OTP in Apps Script
+      await appsScript.storeOtpFromBackend({
         email: cleanEmail,
         otp: generatedOTP,
         otp_type: otpType,
         expires_at: expiresAt,
       });
-      log('OTP stored in Apps Script:', JSON.stringify(storeResult));
-    } catch (err) {
-      console.error('[auth] storeOtpFromBackend threw:', err?.stack || err);
-      return res.status(502).json({ 
-        ok: false, 
-        error: 'otp_store_failed', 
-        message: 'Failed to store OTP. Please try again.' 
-      });
-    }
 
-    if (!storeResult || storeResult.ok === false) {
-      console.error('[auth] Failed to store OTP:', storeResult);
-      return res.status(500).json({
-        ok: false,
-        error: storeResult?.error || 'failed_to_store_otp',
-        message: 'Failed to store OTP. Please try again.',
-      });
-    }
+      log('OTP stored successfully for:', cleanEmail);
 
-    // 4. Send email with OTP
-    try {
-      // Check if user exists to determine email type
+      // 2️⃣ Determine email type (best-effort, non-blocking)
       let userName = '';
       let emailType = 'login';
-      
+
       try {
-        const consultantResult = await appsScript.getConsultantByEmailAction({ email: cleanEmail });
-        if (consultantResult?.ok && consultantResult?.consultant) {
-          userName = consultantResult.consultant.name || '';
-          emailType = 'login';
-        } else {
+        const consultantResult = await appsScript.getConsultantByEmailAction({
+          email: cleanEmail,
+        });
+
+        if (!consultantResult?.ok || !consultantResult?.consultant) {
           emailType = 'signup';
+        } else {
+          userName = consultantResult.consultant.name || '';
         }
-      } catch (e) {
-        log('Could not fetch consultant, defaulting to login type');
+      } catch (_) {
         emailType = 'login';
       }
 
-      // Send the OTP email
-      await emailService.sendOTPEmail(cleanEmail, generatedOTP, userName, emailType);
-      log('✅ OTP email sent successfully to:', cleanEmail);
-      
-    } catch (emailError) {
-      console.error('[auth] Failed to send OTP email:', emailError?.stack || emailError);
-      // Continue - OTP is stored, just log the email error
-      log('⚠️ Email sending failed, but OTP is stored. User can retry if needed.');
-    }
+      // 3️⃣ Send OTP email
+      await emailService.sendOTPEmail(
+        cleanEmail,
+        generatedOTP,
+        userName,
+        emailType
+      );
 
-    return res.json({
-      ok: true,
-      email: cleanEmail,
-      otpType,
-      expiresAt: expiresAt,
-      message: 'OTP sent to your email.',
-    });
-    
-  } catch (err) {
-    console.error('[auth] start-login error:', err?.stack || err);
-    return res.status(500).json({
-      ok: false,
-      error: 'server_error',
-      message: 'Failed to start login. Please try again.',
-    });
-  }
+      log('OTP email sent to:', cleanEmail);
+    } catch (err) {
+      console.error('[auth] background start-login failed:', err?.stack || err);
+    }
+  });
 });
 
 /**
