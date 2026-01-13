@@ -75,14 +75,48 @@ export function buildInvoiceSnapshot(invoice, projectData, clientData, consultan
   // ============================================================================
   // CLIENT
   // ============================================================================
-  const client = {
-  code: invoice.clientCode || clientData?.Client_Code || '',
-  name: invoice.clientName || clientData?.Client_name || '',
-  businessName: invoice.businessName || clientData?.Buisness_Name || '',
-  billingAddress: invoice.billingAddress || clientData?.Billing_Address || '',
-  pan: clientData?.Client_PAN || '',
-  gstin: clientData?.Client_GST || '',
-  stateCode: clientData?.State || ''
+ const client = {
+  code:
+    invoice.clientCode ||
+    clientData?.Client_Code ||
+    clientData?.code ||
+    '',
+
+  name:
+    invoice.clientName ||
+    clientData?.Client_name ||
+    clientData?.name ||
+    '',
+
+  businessName:
+    invoice.businessName ||
+    clientData?.Business_Name ||      // ✅ correct spelling
+    clientData?.businessName ||
+    '',
+
+  billingAddress:
+    invoice.billingAddress ||
+    clientData?.Billing_Address ||
+    clientData?.billingAddress ||
+    '',
+
+  pan:
+    invoice.clientPan ||
+    clientData?.Client_PAN ||
+    clientData?.pan ||
+    '',
+
+  gstin:
+    invoice.clientGstin ||
+    clientData?.Client_GST ||
+    clientData?.gstin ||
+    '',
+
+  stateCode:
+    invoice.clientState ||
+    clientData?.State ||
+    clientData?.stateCode ||
+    ''
 };
 
   // ============================================================================

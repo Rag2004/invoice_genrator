@@ -164,7 +164,7 @@ async function getTeam() {
   return { team: [] };
 }
 
-async function getInvoiceSetupAction(code) {
+async function getInvoiceSetup(code) {
   return post('getInvoiceSetup', { code });
 }
 
@@ -428,7 +428,7 @@ module.exports = {
   getProject,
   getClient,
   getTeam,
-  getInvoiceSetupAction,
+  getInvoiceSetup,
   
   // Auth
   startLogin,

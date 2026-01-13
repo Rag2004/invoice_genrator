@@ -249,15 +249,6 @@ export async function getInvoice(invoiceId) {
 
   return res;
 }
-// export async function createFinalInvoice(snapshot) {
-//   if (!snapshot) {
-//     throw new Error('Invoice snapshot is required');
-//   }
-
-//   return apiPost('/invoices/create-final', {
-//     snapshot,
-//   }, true, 30000);
-// }
 
 
 
@@ -326,43 +317,45 @@ export async function sendInvoiceEmail(data) {
 }
 
 export async function shareInvoice({ 
-  toEmail, 
-  invoiceId, 
-  html,
+  invoiceId,  // ✅ Required
+  html,       // ✅ Required
   projectCode,
   consultantName,
   total,
   subtotal,
   gst 
 }) {
-  if (!toEmail) {
-    throw new Error('Recipient email is required');
+  // ✅ VALIDATION: Invoice ID required (no sharing unsaved drafts)
+  if (!invoiceId) {
+    throw new Error('Invoice ID is required - cannot share unsaved drafts');
   }
+
+  // ✅ VALIDATION: HTML content required
   if (!html) {
     throw new Error('Invoice HTML is required');
   }
 
-  console.log('📤 Sending invoice:', {
-    toEmail,
-    invoiceId: invoiceId || 'DRAFT',
+  console.log('📤 Sharing invoice:', {
+    invoiceId,
     htmlLength: html.length,
     projectCode
   });
 
   try {
+    // ✅ SECURITY: No toEmail parameter - backend fetches from invoice data
     const result = await apiPost('/invoices/share', {
-      toEmail,
+      invoiceId,          // 🔒 Backend will verify this is FINAL
       html,
-      invoiceId: invoiceId || 'DRAFT',
-      projectCode,
-      consultantName,
-      total,
-      subtotal,
-      gst,
+      projectCode,        // Optional context
+      consultantName,     // Optional context
+      total,              // Optional context
+      subtotal,           // Optional context
+      gst,                // Optional context
     }, true, 30000);
 
     console.log('✅ Share API response:', result);
     return result;
+    
   } catch (err) {
     console.error('❌ Share API error:', err);
     throw err;

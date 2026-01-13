@@ -321,21 +321,25 @@ useEffect(() => {
 
         // ✅ Map backend field names to frontend state
         updateInvoice((prev) => ({
-          ...prev,
-          clientCode: res.project.clientCode,
-          consultantId: res.project.consultantId,
-          consultantName: res.consultant?.Consultant_name || "",
-          consultantEmail: res.consultant?.email || "",
-          consultantStatus: res.consultant?.status || "active",
-          clientName: res.client?.Client_name || "",
-          businessName: res.client?.Buisness_Name || "",
-          billingAddress: res.client?.Billing_Address || "",
-          baseHourlyRate: res.project.hourlyRate,
-          serviceFeePct: incomingServiceFeeToPercent(res.project.serviceFeePct),
-          
-          // ✅ Only set stages if empty (new invoice)
-          stages: prev.stages?.length > 0 ? prev.stages : (res.project?.stages || []),
-        }));
+  ...prev,
+  clientCode: res.project.clientCode,
+
+  consultantId: res.project.consultantId,
+  consultantName: res.consultant?.Consultant_name || "",
+  consultantEmail: res.consultant?.email || "",
+  consultantStatus: res.consultant?.status || "active",
+
+  // ✅ FIXED CLIENT MAPPING
+  clientName: res.client?.name || "",
+  businessName: res.client?.businessName || "",
+  billingAddress: res.client?.billingAddress || "",
+
+  baseHourlyRate: res.project.hourlyRate,
+  serviceFeePct: incomingServiceFeeToPercent(res.project.serviceFeePct),
+
+  stages: prev.stages?.length > 0 ? prev.stages : (res.project?.stages || []),
+}));
+
       })
       .finally(() => setLoadingProject(false));
   }, [debouncedProjectCode, loadingDraft, invoiceId]);
@@ -830,191 +834,279 @@ useEffect(() => {
             </span>
           )}
         </div>
-        {/* Invoice Details Card */}
+     {/* Invoice Details Card */}
       <div className="card">
-        <div className="card-header">📋 Invoice Details</div>
-        <div className="grid-3">
-          <InfoBox
-            label="Invoice Number"
-            value={invoice.invoiceNumber || (invoice.status === 'FINAL' ? 'Auto-generated' : null)}
-            loading={false}
-          />
-          <div className="form-group">
-            <label>Invoice Date</label>
+        <div className="section-header-row">
+          <div className="blue-accent-bar" />
+          <h2 className="section-title-alt">📄 Invoice Details</h2>
+        </div>
+
+        <div className="rigid-grid-3">
+          {/* Invoice Number */}
+          <div className="rigid-data-box">
+            <div className="rigid-label">Invoice Number</div>
+            <div className="rigid-value">
+              {invoice.invoiceNumber || "Will auto-fill"}
+            </div>
+          </div>
+
+          {/* Invoice Date */}
+          <div className="rigid-data-box">
+            <div className="rigid-label">Invoice Date</div>
             <input
               type="date"
+              className="rigid-input-field"
               value={invoice.date}
               onChange={(e) => updateInvoice({ date: e.target.value })}
             />
+          </div>
+
+          {/* Empty third column for 3-column consistency */}
+          <div className="rigid-data-box" style={{ visibility: 'hidden' }}>
+            <div className="rigid-label">Placeholder</div>
+            <div className="rigid-value">-</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Project Lookup Card */}
+      <div className="card">
+        <div className="section-header-row">
+          <div className="blue-accent-bar" />
+          <h2 className="section-title-alt">🔍 Project Lookup</h2>
+        </div>
+
+        <div className="rigid-grid-3">
+          {/* Project Code - Editable */}
+          <div className="rigid-data-box">
+            <div className="rigid-label">Project Code (Editable)</div>
+            <input
+              className="rigid-input-field"
+              placeholder="PRJ_XXXXX"
+              value={invoice.projectCode}
+              onChange={(e) => updateInvoice({ projectCode: e.target.value })}
+            />
+          </div>
+
+          {/* Consultant ID - Auto */}
+          <div className="rigid-data-box">
+            <div className="rigid-label">Consultant ID (Auto)</div>
+            <div className="rigid-value">
+              {loadingProject ? "Loading..." : (invoice.consultantId || "Will auto-fill")}
+            </div>
+          </div>
+
+          {/* Client ID - Auto */}
+          <div className="rigid-data-box">
+            <div className="rigid-label">Client ID (Auto)</div>
+            <div className="rigid-value">
+              {loadingProject ? "Loading..." : (invoice.clientCode || "Will auto-fill")}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Consultant Card */}
+      <div className="card">
+        <div className="section-header-row">
+          <div className="blue-accent-bar" />
+          <h2 className="section-title-alt">👤 Consultant</h2>
+        </div>
+
+        <div className="rigid-grid-3">
+          <div className="rigid-data-box">
+            <div className="rigid-label">Consultant Name</div>
+            <div className="rigid-value">
+              {loadingProject ? "Loading..." : (invoice.consultantName || "Will auto-fill")}
+            </div>
+          </div>
+
+          <div className="rigid-data-box">
+            <div className="rigid-label">Consultant Email</div>
+            <div className="rigid-value">
+              {loadingProject ? "Loading..." : (invoice.consultantEmail || "Will auto-fill")}
+            </div>
+          </div>
+
+          <div className="rigid-data-box">
+            <div className="rigid-label">Consultant Status</div>
+            <div className="rigid-value">
+              {loadingProject ? "Loading..." : (invoice.consultantStatus || "Active")}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Client Card */}
+      <div className="card">
+        <div className="section-header-row">
+          <div className="blue-accent-bar" />
+          <h2 className="section-title-alt">🏢 Client</h2>
+        </div>
+
+        <div className="rigid-grid-3">
+          <div className="rigid-data-box">
+            <div className="rigid-label">Client Name</div>
+            <div className="rigid-value">
+              {loadingProject ? "Loading..." : (invoice.clientName || "Will auto-fill")}
+            </div>
+          </div>
+
+          <div className="rigid-data-box">
+            <div className="rigid-label">Business Name</div>
+            <div className="rigid-value">
+              {loadingProject ? "Loading..." : (invoice.businessName || "Will auto-fill")}
+            </div>
+          </div>
+
+          <div className="rigid-data-box">
+            <div className="rigid-label">Billing Address</div>
+            <div className="rigid-value">
+              {loadingProject ? "Loading..." : (invoice.billingAddress || "Will auto-fill")}
+            </div>
           </div>
         </div>
       </div>
 
       {/* Billing Info Card */}
-      {/* <div className="card">
-        <div className="card-header">💰 Billing / Project Info</div>
-        <div className="grid-3">
-          <InfoBox
-            label="Base Hourly Rate"
-            value={invoice.baseHourlyRate ? `₹${invoice.baseHourlyRate}/hr` : null}
-            loading={loadingProject}
-          />
-          <InfoBox
-            label="Service Fee"
-            value={invoice.serviceFeePct ? `${invoice.serviceFeePct}%` : null}
-            loading={loadingProject}
-          />
+      <div className="card">
+        <div className="section-header-row">
+          <div className="blue-accent-bar" />
+          <h2 className="section-title-alt">💰 Billing / Project Info</h2>
         </div>
-      </div> */}
-        {/* Project Lookup Card */}
-        <div className="card">
-          <div className="card-header">
-            <h2 className="card-title">🔍 Project Lookup</h2>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px" }}>
-            <div>
-              <label style={{
-                display: "block",
-                fontSize: "0.7rem",
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-                color: "#6b7280",
-                marginBottom: "6px",
-                fontWeight: 600,
-              }}>
-                Project Code (Editable)
-              </label>
-              <input
-                className="input"
-                placeholder="PRJ_XXXXX"
-                value={invoice.projectCode}
-                onChange={(e) => updateInvoice({ projectCode: e.target.value })}
-              />
+
+        <div className="rigid-grid-3">
+          <div className="rigid-data-box">
+            <div className="rigid-label">Hourly Rate (From Project)</div>
+            <div className="rigid-value">
+              {loadingProject ? "Loading..." : (invoice.baseHourlyRate ? formatINR(invoice.baseHourlyRate) : "Will auto-fill")}
             </div>
-            <InfoBox label="Consultant ID (Auto)" value={invoice.consultantId} loading={loadingProject} />
-            <InfoBox label="Client ID (Auto)" value={invoice.clientCode} loading={loadingProject} />
           </div>
-        </div>
 
-        {/* Consultant Card */}
-        <div className="card">
-          <div className="card-header">
-            <h2 className="card-title">👤 Consultant</h2>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px" }}>
-            <InfoBox label="Consultant Name" value={invoice.consultantName} loading={loadingProject} />
-            <InfoBox label="Consultant Email" value={invoice.consultantEmail} loading={loadingProject} />
-            <InfoBox label="Consultant Status" value={invoice.consultantStatus} loading={loadingProject} />
-          </div>
-        </div>
-
-        {/* Client Card */}
-        <div className="card">
-          <div className="card-header">
-            <h2 className="card-title">🏢 Client</h2>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px" }}>
-            <InfoBox label="Client Name" value={invoice.clientName} loading={loadingProject} />
-            <InfoBox label="Business Name" value={invoice.businessName} loading={loadingProject} />
-            <InfoBox label="Billing Address" value={invoice.billingAddress} loading={loadingProject} />
-          </div>
-        </div>
-
-        {/* Billing Info Card */}
-        <div className="card">
-          <div className="card-header">
-            <h2 className="card-title">💰 Billing / Project Info</h2>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px" }}>
-            <InfoBox 
-              label="Hourly Rate (From Project)" 
-              value={invoice.baseHourlyRate ? formatINR(invoice.baseHourlyRate) : null} 
-              loading={loadingProject} 
-            />
-            <InfoBox 
-              label="Service Fee % (From Project)" 
-              value={invoice.serviceFeePct ? `${invoice.serviceFeePct}%` : null} 
-              loading={loadingProject} 
-            />
-            <InfoBox label="GST % (Fixed)" value="18%" loading={false} />
-          </div>
-        </div>
-
-        {/* Team & Stages Card */}
-        <div className="card">
-          <div className="card-header">
-            <h2 className="card-title">👥 Team & Stages</h2>
-          </div>
-          <TeamSummary
-            invoice={invoice}
-            updateInvoice={updateInvoice}
-            teamOptions={teamOptions}
-            baseHourlyRate={invoice.baseHourlyRate}
-          />
-        </div>
-
-        {/* Notes & Billing Summary Card */}
-        <div className="card">
-          <div className="card-header">
-            <h2 className="card-title">📋 Notes & Billing Summary</h2>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "16px", alignItems: "flex-start" }}>
-            <div>
-              <label style={{
-                display: "block",
-                fontSize: "0.7rem",
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-                color: "#6b7280",
-                marginBottom: "6px",
-                fontWeight: 600,
-              }}>
-                Notes (Optional)
-              </label>
-              <textarea
-                className="textarea"
-                placeholder="Notes..."
-                rows={10}
-                value={invoice.notes}
-                onChange={(e) => updateInvoice({ notes: e.target.value })}
-                style={{ minHeight: "100%", height: "100%", resize: "none" }}
-              />
+          <div className="rigid-data-box">
+            <div className="rigid-label">Service Fee % (From Project)</div>
+            <div className="rigid-value">
+              {loadingProject ? "Loading..." : (invoice.serviceFeePct ? `${invoice.serviceFeePct}%` : "Will auto-fill")}
             </div>
-            <div className="billing-card" style={{ height: "100%" }}>
-              <div style={{ marginBottom: "12px", fontSize: "0.95rem", fontWeight: 600, color: "#374151" }}>
-                Billing Total
-              </div>
-              <div className="billing-row">
-                <span>Subtotal</span>
-                <span>{formatINR(invoice.subtotal)}</span>
-              </div>
-              <div className="billing-row">
-                <span>GST</span>
-                <span>{formatINR(invoice.gst)}</span>
-              </div>
+          </div>
+
+          <div className="rigid-data-box">
+            <div className="rigid-label">GST % (Fixed)</div>
+            <div className="rigid-value">18%</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Stage Groups & Sub-Stages Card */}
+      <div className="card">
+        <div className="section-header-row">
+          <div className="blue-accent-bar" />
+          <h2 className="section-title-alt">📊 Stage Groups & Sub-Stages</h2>
+        </div>
+        {/* <div style={{ 
+          fontSize: '0.875rem', 
+          color: '#64748b', 
+          marginBottom: '16px',
+          lineHeight: '1.5'
+        }}>
+          Configure stages (e.g., Stage 1 = 30%) and their sub-stages. These become the columns in the table below.
+        </div> */}
+        <TeamSummary
+          invoice={invoice}
+          updateInvoice={updateInvoice}
+          teamOptions={teamOptions}
+          baseHourlyRate={invoice.baseHourlyRate}
+          showOnlyStages={true}
+        />
+      </div>
+
+      {/* Billable Hours Card */}
+      <div className="card">
+        <div className="section-header-row">
+          <div className="blue-accent-bar" />
+          <h2 className="section-title-alt">⏱️ Billable Hours</h2>
+        </div>
+        {/* <div style={{ 
+          fontSize: '0.875rem', 
+          color: '#64748b', 
+          marginBottom: '16px',
+          lineHeight: '1.5'
+        }}>
+          Enter hours for each sub-stage per team member. Factors & rates are calculated automatically.
+        </div> */}
+        <TeamSummary
+          invoice={invoice}
+          updateInvoice={updateInvoice}
+          teamOptions={teamOptions}
+          baseHourlyRate={invoice.baseHourlyRate}
+          showOnlyTable={true}
+        />
+      </div>
+
+      {/* Notes & Billing Summary Card */}
+      <div className="card">
+        <div className="section-header-row">
+          <div className="blue-accent-bar" />
+          <h2 className="section-title-alt">📋 Notes & Billing Summary</h2>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "16px", alignItems: "flex-start" }}>
+          <div>
+            <label style={{
+              display: "block",
+              fontSize: "0.7rem",
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+              color: "#6b7280",
+              marginBottom: "6px",
+              fontWeight: 600,
+            }}>
+              Notes (Optional)
+            </label>
+            <textarea
+              className="textarea"
+              placeholder="Notes..."
+              rows={10}
+              value={invoice.notes}
+              onChange={(e) => updateInvoice({ notes: e.target.value })}
+              style={{ minHeight: "100%", height: "100%", resize: "none" }}
+            />
+          </div>
+          <div className="billing-card" style={{ height: "100%" }}>
+            <div style={{ marginBottom: "12px", fontSize: "0.95rem", fontWeight: 600, color: "#374151" }}>
+              Billing Total
+            </div>
+            <div className="billing-row">
+              <span>Subtotal</span>
+              <span>{formatINR(invoice.subtotal)}</span>
+            </div>
+            <div className="billing-row">
+              <span>GST</span>
+              <span>{formatINR(invoice.gst)}</span>
+            </div>
+            <div className="billing-divider" />
+            <div className="billing-row billing-row-total">
+              <span>Total</span>
+              <span>{formatINR(invoice.total)}</span>
+            </div>
+            <div className="consultant-only">
               <div className="billing-divider" />
+              <div className="billing-row">
+                <span>Service Fee ({invoice.serviceFeePct}%)</span>
+                <span style={{ color: "#e53935" }}>-{formatINR(invoice.serviceFeeAmount)}</span>
+              </div>
               <div className="billing-row billing-row-total">
-                <span>Total</span>
-                <span>{formatINR(invoice.total)}</span>
+                <span>Net Earnings</span>
+                <span style={{ color: "#4caf50" }}>{formatINR(invoice.netEarnings)}</span>
               </div>
-              <div className="consultant-only">
-                <div className="billing-divider" />
-                <div className="billing-row">
-                  <span>Service Fee ({invoice.serviceFeePct}%)</span>
-                  <span style={{ color: "#e53935" }}>-{formatINR(invoice.serviceFeeAmount)}</span>
-                </div>
-                <div className="billing-row billing-row-total">
-                  <span>Net Earnings</span>
-                  <span style={{ color: "#4caf50" }}>{formatINR(invoice.netEarnings)}</span>
-                </div>
-                <p style={{ fontSize: "0.7rem", color: "#9ca3af", marginTop: "8px", fontStyle: "italic" }}>
-                  * Visible only to you. Not shown to clients.
-                </p>
-              </div>
+              <p style={{ fontSize: "0.7rem", color: "#9ca3af", marginTop: "8px", fontStyle: "italic" }}>
+                * Visible only to you. Not shown to clients.
+              </p>
             </div>
           </div>
         </div>
-      </main>
+      </div>
+    </main>
 
       {/* ✅ Hidden invoice for Share (rendered once, reused) */}
 <div style={{ 
@@ -1027,7 +1119,7 @@ useEffect(() => {
 }}>
   <div ref={invoiceRef}>
     {(() => {
-      // ✅ Build snapshot for rendering
+      // ✅ Build complete snapshot matching InvoicePreviewModal structure
       const snapshot = {
         meta: {
           invoiceId: invoice.invoiceId || "DRAFT",
@@ -1036,7 +1128,7 @@ useEffect(() => {
           invoiceDate: invoice.date,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-          finalizedAt: null
+          finalizedAt: invoice.status === 'FINAL' ? new Date().toISOString() : null
         },
         
         project: {
@@ -1046,26 +1138,26 @@ useEffect(() => {
         
         consultant: {
           id: invoice.consultantId,
-          name: invoice.consultantName,
+          name: consultantData?.Consultant_name || invoice.consultantName || '',
           email: consultantData?.email || invoice.consultantEmail || '',
-          businessName: consultantData?.business_name || consultantData?.Consultant_name || invoice.consultantName,
+          businessName: consultantData?.business_name || consultantData?.Consultant_name || invoice.consultantName || '',
           registeredOffice: consultantData?.business_registered_office || '',
           pan: consultantData?.business_pan || '',
           gstin: consultantData?.business_gstin || '',
           cin: consultantData?.business_cin || '',
           stateCode: consultantData?.business_state_code || '',
-          hourlyRate: invoice.baseHourlyRate  // ✅ CRITICAL: Add this line
+          hourlyRate: invoice.baseHourlyRate || 0
         },
         
         client: {
-  code: invoice.clientCode,
-  name: clientData?.Client_name || invoice.clientName || '',
-  businessName: clientData?.Buisness_Name || invoice.businessName || '',
-  billingAddress: invoice.billingAddress || clientData?.Billing_Address || '',
-  pan: clientData?.Client_PAN || '',     // ✅ Correct field name
-  gstin: clientData?.Client_GST || '',   // ✅ Correct field name
-  stateCode: clientData?.State || ''
-},
+          code: invoice.clientCode || '',
+          name: clientData?.Client_name || invoice.clientName || '',
+          businessName: clientData?.Buisness_Name || invoice.businessName || '',
+          billingAddress: clientData?.Billing_Address || invoice.billingAddress || '',
+          pan: clientData?.Client_PAN || clientData?.PAN || '',
+          gstin: clientData?.Client_GST || clientData?.GSTIN || '',
+          stateCode: clientData?.State || ''
+        },
         
         serviceProvider: {
           name: "Hourly Ventures LLP",
@@ -1081,23 +1173,23 @@ useEffect(() => {
           stages: invoice.stages || [],
           items: (invoice.items || []).map(item => ({
             memberId: item.memberId,
-            name: item.name,
-            mode: item.mode,
-            rate: item.rate,
-            factor: item.factor,
-            hours: item.hours,
-            amount: item.amount,
-            stageHours: item.stageHours
+            name: item.name || '',
+            mode: item.mode || 'Online',
+            rate: Number(item.rate || 0),
+            factor: Number(item.factor || 1),
+            hours: Number(item.hours || 0),
+            amount: Number(item.amount || 0),
+            stageHours: item.stageHours || {}
           }))
         },
         
         totals: {
-          subtotal: invoice.subtotal,
-          gst: invoice.gst,
-          total: invoice.total,
-          serviceFeePct: invoice.serviceFeePct,
-          serviceFeeAmount: invoice.serviceFeeAmount,
-          netEarnings: invoice.netEarnings
+          subtotal: Number(invoice.subtotal || 0),
+          gst: Number(invoice.gst || 0),
+          total: Number(invoice.total || 0),
+          serviceFeePct: Number(invoice.serviceFeePct || 0),
+          serviceFeeAmount: Number(invoice.serviceFeeAmount || 0),
+          netEarnings: Number(invoice.netEarnings || 0)
         },
         
         compliance: {
@@ -1107,6 +1199,15 @@ useEffect(() => {
         
         notes: invoice.notes || ""
       };
+
+      // ✅ Log snapshot for debugging
+      console.log('📧 Email Share Snapshot:', {
+        hasConsultant: !!snapshot.consultant?.name,
+        hasClient: !!snapshot.client?.name,
+        itemsCount: snapshot.work?.items?.length || 0,
+        consultantPAN: snapshot.consultant?.pan,
+        clientPAN: snapshot.client?.pan
+      });
 
       return (
         <InvoiceComplete
@@ -1130,48 +1231,73 @@ useEffect(() => {
       />
 
       {/* Footer Actions */}
-      <div className="footer-actions">
-        <div className="left">
-          <button className="btn btn-ghost" onClick={handlePreview}>
-            📄 Preview
-          </button>
-          <button className="btn btn-ghost" onClick={() => setIsShareDialogOpen(true)}>
-            ✉️ Share
-          </button>
-        </div>
-        <div className="right">
-          <div style={{
-            padding: "8px 16px",
-            background: "#f9fafb",
-            border: "1px solid #e5e7eb",
-            borderRadius: "6px",
-            fontSize: "1.2rem",
-            fontWeight: 700,
-          }}>
-            Total: {formatINR(invoice.total)}
-          </div>
-          <button className="btn btn-ghost" onClick={handleSaveDraft} disabled={isSaving}>
-            {isSaving ? '💾 Saving...' : '💾 Save Draft'}
-          </button>
-          <button className="btn btn-success" onClick={handleSaveFinalInvoice} disabled={isSaving}>
-            {isSaving ? '⏳ Saving...' : '✅ Save Invoice'}
-          </button>
-        </div>
-      </div>
-
-      {/* Share Dialog */}
-      <ShareInvoiceDialog
-        isOpen={isShareDialogOpen}
-        onClose={() => setIsShareDialogOpen(false)}
-        invoiceData={{
-          invoiceId: invoice.invoiceId || "DRAFT",
-          projectCode: invoice.projectCode,
-          subtotal: invoice.subtotal,
-          gst: invoice.gst,
-          total: invoice.total,
-        }}
-        onShare={handleShare}
-      />
+<div className="footer-actions">
+  <div className="left">
+    <button className="btn btn-ghost" onClick={handlePreview}>
+      📄 Preview
+    </button>
+    <button 
+      className="btn btn-ghost" 
+      onClick={() => setIsShareDialogOpen(true)}
+      disabled={invoice.status !== 'FINAL'}
+      title={invoice.status !== 'FINAL' ? 'Please finalize the invoice first to share' : 'Share invoice via email'}
+      style={{
+        opacity: invoice.status !== 'FINAL' ? 0.5 : 1,
+        cursor: invoice.status !== 'FINAL' ? 'not-allowed' : 'pointer'
+      }}
+    >
+      ✉️ Share
+    </button>
+  </div>
+  <div className="right">
+    <div style={{
+      padding: "8px 16px",
+      background: "#f9fafb",
+      border: "1px solid #e5e7eb",
+      borderRadius: "6px",
+      fontSize: "1.2rem",
+      fontWeight: 700,
+    }}>
+      Total: {formatINR(invoice.total)}
     </div>
-  );
+    <button 
+      className="btn btn-ghost" 
+      onClick={handleSaveDraft} 
+      disabled={isSaving || invoice.status === 'FINAL'}
+      title={invoice.status === 'FINAL' ? 'Invoice already finalized' : 'Save as draft'}
+    >
+      {isSaving ? '💾 Saving...' : '💾 Save Draft'}
+    </button>
+    <button 
+      className="btn btn-success" 
+      onClick={handleSaveFinalInvoice} 
+      disabled={isSaving || invoice.status === 'FINAL'}
+      title={invoice.status === 'FINAL' ? 'Invoice already finalized' : 'Finalize and save invoice'}
+    >
+      {isSaving 
+        ? '⏳ Saving...' 
+        : invoice.status === 'FINAL' 
+        ? '✅ Finalized' 
+        : '✅ Save Invoice'}
+    </button>
+  </div>
+</div>
+
+{/* Share Dialog */}
+<ShareInvoiceDialog
+  isOpen={isShareDialogOpen}
+  onClose={() => setIsShareDialogOpen(false)}
+  invoiceData={{
+    invoiceId: invoice.invoiceId,
+    invoiceNumber: invoice.invoiceNumber || "DRAFT",
+    projectCode: invoice.projectCode,
+    subtotal: invoice.subtotal,
+    gst: invoice.gst,
+    total: invoice.total,
+  }}
+  clientEmail={clientData?.Client_email || clientData?.email || invoice.clientEmail || ''}
+  onShare={handleShare}
+/>
+</div>
+);
 }

@@ -1498,6 +1498,24 @@ body {
   color: #cbd5e1;
   font-weight: 400;
 }
+/* Disabled button styling */
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.btn-ghost:disabled {
+  background: #f3f4f6;
+  color: #9ca3af;
+  border-color: #e5e7eb;
+}
+
+/* Show helpful cursor on hover when disabled */
+.btn:disabled[title] {
+  pointer-events: auto;
+  cursor: not-allowed;
+}
 
 
 /* ==================== END ==================== */
