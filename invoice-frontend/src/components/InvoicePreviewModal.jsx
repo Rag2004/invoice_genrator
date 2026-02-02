@@ -61,11 +61,9 @@ export default function InvoicePreviewModal({
   
   if (invoice.status === 'FINAL' && invoice.snapshot) {
     // ✅ For FINAL invoices, use the hydrated snapshot directly
-    console.log('✅ Using existing snapshot from FINAL invoice');
     snapshot = invoice.snapshot;
   } else {
     // ✅ For DRAFT invoices, build snapshot from flat state
-    console.log('✅ Building snapshot from DRAFT invoice');
     snapshot = buildInvoiceSnapshot(
       invoice,
       projectData,
@@ -75,19 +73,7 @@ export default function InvoicePreviewModal({
   }
 
   // ============================================================================
-  // DEBUG LOGGING
   // ============================================================================
-  console.log('🔍 Preview Modal Snapshot:', {
-    status: invoice.status,
-    hasSnapshot: !!snapshot,
-    hasMeta: !!snapshot.meta,
-    invoiceNumber: snapshot.meta?.invoiceNumber,
-    consultantName: snapshot.consultant?.name,
-    consultantBusinessName: snapshot.consultant?.businessName,
-    consultantPAN: snapshot.consultant?.pan,
-    clientName: snapshot.client?.name,
-    itemsCount: snapshot.work?.items?.length
-  });
 
   // ============================================================================
   // RENDER

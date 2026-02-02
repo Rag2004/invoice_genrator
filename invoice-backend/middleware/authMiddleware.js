@@ -9,8 +9,9 @@ const jwtHelper = require('../utils/jwtHelper');
  * - Dev helper: if header x-consultant-id is present, it will be used (for local testing)
  */
 function authMiddleware(req, res, next) {
-  // Dev shortcut: allow setting consultant id directly via header (only used if present)
-  const devConsultantId = req.headers['x-consultant-id'] || req.headers['x-consultantid'];
+  // Dev-only: allow setting consultant id via header. Disabled in production.
+  const isProduction = process.env.NODE_ENV === 'production';
+  const devConsultantId = !isProduction && (req.headers['x-consultant-id'] || req.headers['x-consultantid']);
   if (devConsultantId) {
     req.user = req.user || {};
     req.user.consultant_id = req.user.consultantId = req.user.id = String(devConsultantId);

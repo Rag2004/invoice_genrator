@@ -1,8 +1,13 @@
 // utils/jwtHelper.js
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+const isProduction = process.env.NODE_ENV === 'production';
+const JWT_SECRET = process.env.JWT_SECRET || (isProduction ? null : 'your-secret-key');
 const JWT_EXPIRY = process.env.JWT_EXPIRY || '7d';
+
+if (isProduction && !JWT_SECRET) {
+  throw new Error('JWT_SECRET must be set in production');
+}
 
 /**
  * Generate JWT token for user (main function)
@@ -46,7 +51,9 @@ function generateToken(payload = {}) {
     });
     return token;
   } catch (error) {
-    console.error('Error generating token:', error);
+    if (process.env.NODE_ENV !== 'production') {
+      console.error('Error generating token:', error);
+    }
     throw new Error('Failed to generate token');
   }
 }

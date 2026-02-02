@@ -1,198 +1,5 @@
+// server.js - PRODUCTION READY
 
-// // server.js
-// require('dotenv').config();
-// const express = require('express');
-// const bodyParser = require('body-parser');
-// const cors = require('cors');
-// const logger = require('./utils/logger');
-// const { verifyEmailConfig } = require('./utils/invoiceEmailService');
-// const authMiddleware = require('./middleware/authMiddleware');
-
-// const app = express();
-// const port = process.env.PORT || 4000;
-// const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:5174'  ||  'http://localhost:5173"';
-
-
-// // -------------------- CORS CONFIG (FIXED) --------------------
-// // -------------------- CORS CONFIG (PRODUCTION SAFE) --------------------
-// const allowedOrigins = [
-//   'http://localhost:5173',
-//   'http://localhost:5174',
-//   'https://earnest-acceptance-production-b2de.up.railway.app'
-// ];
-
-// const corsOptions = {
-//   origin: (origin, callback) => {
-//     // Allow server-to-server & Railway internal calls
-//     if (!origin) return callback(null, true);
-
-//     if (allowedOrigins.includes(origin)) {
-//       return callback(null, true);
-//     }
-
-//     console.error('❌ CORS BLOCKED:', origin);
-//     return callback(null, false); // IMPORTANT: do NOT throw error
-//   },
-//   credentials: true,
-//   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-//   allowedHeaders: [
-//     'Content-Type',
-//     'Authorization',
-//     'X-Consultant-Id',
-//     'Accept',
-//   ],
-// };
-
-// app.use(cors(corsOptions));
-// app.options('*', cors(corsOptions));
-
-
-// // // ✅ Apply CORS middleware BEFORE routes
-// // app.use(cors(corsOptions));
-
-// // // ✅ Handle preflight requests for ALL routes
-// // app.options('*', cors(corsOptions));
-
-// // ✅ Body parser - INCREASED LIMIT for invoice HTML
-// app.use(bodyParser.json({ limit: '5mb' }));
-// app.use(bodyParser.urlencoded({ extended: true, limit: '5mb' }));
-
-// // -------------------- ROUTES -------------------------
-// app.get('/health', (req, res) => res.json({ 
-//   ok: true, 
-//   env: process.env.NODE_ENV || 'dev', 
-//   now: new Date().toISOString() 
-// }));
-
-// // ✅ Mount specific routes FIRST (most specific to least specific)
-// const authRouter = require('./routes/auth');
-// const invoicesRouter = require('./routes/invoices');
-// const dashboardRouter = require('./routes/dashboard');
-// const modesRouter = require('./routes/modes');
-
-// app.use('/api/auth', authRouter);
-// app.use('/api/invoices', authMiddleware, invoicesRouter);       // ✅ This handles /share, /drafts/*, etc.
-// app.use('/api/dashboard', dashboardRouter);
-// app.use('/api/modes', modesRouter);
-
-// // ✅ OPTIONAL: Generic routes (only if ./routes/index.js exists)
-// // Remove this if you don't have a routes/index.js file
-// try {
-//   const routes = require('./routes');
-//   app.use('/api', routes);
-//   logger.info('✅ Generic routes loaded from ./routes');
-// } catch (err) {
-//   logger.info('ℹ️  No generic routes/index.js file (this is OK)');
-// }
-
-// // Admin / debug endpoint to reset stub memory if using stub mode
-// app.post('/api/admin/reset-stub', (req, res) => {
-//   const key = req.headers['x-api-key'] || req.query.apiKey;
-//   if (key !== (process.env.ADMIN_API_KEY || '')) {
-//     return res.status(401).json({ error: 'unauthorized' });
-//   }
-//   try {
-//     const apps = require('./lib/appsScriptClient');
-//     if (apps.mode !== 'stub') {
-//       return res.status(400).json({ error: 'not available' });
-//     }
-//     if (apps._memory) {
-//       apps._memory.invoices = [];
-//       apps._memory.drafts = [];
-//       apps._memory.consultants = new Map();
-//       apps._memory.otpSessions = new Map();
-//     }
-//     return res.json({ ok: true });
-//   } catch (err) {
-//     return res.status(500).json({ ok: false, error: err.message });
-//   }
-// });
-
-// // ✅ Test endpoint to verify invoice routes are loaded
-// app.get('/api/invoices-test', (req, res) => {
-//   res.json({
-//     ok: true,
-//     message: 'Invoice routes are loaded!',
-//     availableRoutes: [
-//       'POST /api/invoices/draft',
-//       'POST /api/invoices/draft/:id',
-//       'POST /api/invoices/finalize',
-//       'POST /api/invoices/share',
-//       'POST /api/invoices/send-email',
-//       'GET  /api/invoices',
-//       'GET  /api/invoices/:id',
-//       'GET  /api/invoices/drafts/consultant/:id',
-//       'GET  /api/invoices/drafts/item/:id'
-//     ]
-//   });
-// });
-
-// // -------------------- 404 HANDLER (MUST BE AFTER ALL ROUTES) ------------------
-// app.use((req, res, next) => {
-//   logger.warn({ method: req.method, path: req.path }, 'Route not found');
-//   res.status(404).json({ 
-//     ok: false,
-//     error: `Cannot ${req.method} ${req.path}`,
-//     message: 'Endpoint not found'
-//   });
-// });
-
-// // -------------------- ERROR HANDLER (MUST BE LAST) ------------------
-// app.use((err, req, res, next) => {
-//   logger.error({ 
-//     err: err.message, 
-//     stack: err.stack,
-//     method: req.method,
-//     path: req.path
-//   }, 'Server error');
-  
-//   res.status(err.status || 500).json({ 
-//     ok: false,
-//     error: err.message || 'Internal server error',
-//     ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
-//   });
-// });
-
-// // -------------------- EMAIL & PDF VERIFICATION ------------------
-// // Verify email and PDF generation on startup
-// (async () => {
-//   console.log('\n🔍 Starting service checks...\n');
-  
-//   // Test email
-//   try {
-//     const isConfigured = await verifyEmailConfig();
-//     if (!isConfigured) {
-//       console.log('⚠️  Email service not configured');
-//       console.log('   Set EMAIL_USER and EMAIL_PASSWORD in .env file\n');
-//     }
-//   } catch (err) {
-//     console.error('❌ Email verification failed:', err.message);
-//     console.log('   Invoice sharing will not work until email is configured\n');
-//   }
-  
-//   // Test PDF generation
-//   try {
-//     const { testPuppeteer } = require('./utils/pdfGenerator');
-//     await testPuppeteer();
-//     console.log('');
-//   } catch (err) {
-//     console.error('⚠️  PDF generation test skipped:', err.message);
-//     console.log('');
-//   }
-// })();
-
-// // -------------------- START SERVER -------------------
-// app.listen(port, () => {
-//   logger.info(`Invoice backend listening on port ${port}`);
-//   logger.info(`APPS_SCRIPT_URL set: ${Boolean(process.env.APPS_SCRIPT_URL)}`);
-//   logger.info({ allowedOrigins }, 'CORS enabled');
-  
-//   console.log(`\n🚀 Server running at http://localhost:${port}`);
-//   console.log(`📧 Email: ${process.env.EMAIL_USER ? '✅ Configured' : '❌ Not configured'}`);
-//   console.log(`🔗 CORS allowed origins:`, allowedOrigins);
-//   console.log(`\n📋 Route Test: http://localhost:${port}/api/invoices-test\n`);
-// });
-// server.js - UPDATED WITH ALL ROUTES
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -203,14 +10,15 @@ const authMiddleware = require('./middleware/authMiddleware');
 
 const app = express();
 const port = process.env.PORT || 4000;
-const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:5174'  ||  'http://localhost:5173"';
+const isProduction = process.env.NODE_ENV === 'production';
 
 // -------------------- CORS CONFIG (PRODUCTION SAFE) --------------------
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:5174',
-  'https://earnest-acceptance-production-b2de.up.railway.app'
-];
+  ...(process.env.FRONTEND_ORIGIN ? process.env.FRONTEND_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean) : []),
+  'https://earnest-acceptance-production-b2de.up.railway.app',
+].filter((o, i, arr) => arr.indexOf(o) === i);
 
 const corsOptions = {
   origin: (origin, callback) => {
@@ -221,7 +29,7 @@ const corsOptions = {
       return callback(null, true);
     }
 
-    console.error('❌ CORS BLOCKED:', origin);
+    logger.warn({ origin }, 'CORS blocked');
     return callback(null, false);
   },
   credentials: true,
@@ -242,10 +50,10 @@ app.use(bodyParser.json({ limit: '5mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '5mb' }));
 
 // -------------------- ROUTES -------------------------
-app.get('/health', (req, res) => res.json({ 
-  ok: true, 
-  env: process.env.NODE_ENV || 'dev', 
-  now: new Date().toISOString() 
+app.get('/health', (req, res) => res.json({
+  ok: true,
+  env: process.env.NODE_ENV || 'dev',
+  now: new Date().toISOString()
 }));
 
 // ✅ Import all route modules
@@ -284,31 +92,34 @@ try {
   logger.info('ℹ️  No generic routes/index.js file (this is OK)');
 }
 
-// Admin / debug endpoint to reset stub memory if using stub mode
-app.post('/api/admin/reset-stub', (req, res) => {
-  const key = req.headers['x-api-key'] || req.query.apiKey;
-  if (key !== (process.env.ADMIN_API_KEY || '')) {
-    return res.status(401).json({ error: 'unauthorized' });
-  }
-  try {
-    const apps = require('./lib/appsScriptClient');
-    if (apps.mode !== 'stub') {
-      return res.status(400).json({ error: 'not available' });
+// Admin / debug endpoint — only in non-production or when ADMIN_API_KEY is set
+if (!isProduction || process.env.ADMIN_API_KEY) {
+  app.post('/api/admin/reset-stub', (req, res) => {
+    const key = req.headers['x-api-key'] || req.query.apiKey;
+    if (key !== (process.env.ADMIN_API_KEY || '')) {
+      return res.status(401).json({ error: 'unauthorized' });
     }
-    if (apps._memory) {
-      apps._memory.invoices = [];
-      apps._memory.drafts = [];
-      apps._memory.consultants = new Map();
-      apps._memory.otpSessions = new Map();
+    try {
+      const apps = require('./lib/appsScriptClient');
+      if (apps.mode !== 'stub') {
+        return res.status(400).json({ error: 'not available' });
+      }
+      if (apps._memory) {
+        apps._memory.invoices = [];
+        apps._memory.drafts = [];
+        apps._memory.consultants = new Map();
+        apps._memory.otpSessions = new Map();
+      }
+      return res.json({ ok: true });
+    } catch (err) {
+      return res.status(500).json({ ok: false, error: err.message });
     }
-    return res.json({ ok: true });
-  } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message });
-  }
-});
+  });
+}
 
-// ✅ Test endpoints to verify routes are loaded
-app.get('/api/test-routes', (req, res) => {
+// Test routes — disabled in production to avoid leaking API structure
+if (!isProduction) {
+  app.get('/api/test-routes', (req, res) => {
   res.json({
     ok: true,
     message: 'All routes are loaded!',
@@ -343,12 +154,13 @@ app.get('/api/test-routes', (req, res) => {
       ]
     }
   });
-});
+  });
+}
 
 // -------------------- 404 HANDLER (MUST BE AFTER ALL ROUTES) ------------------
 app.use((req, res, next) => {
   logger.warn({ method: req.method, path: req.path }, 'Route not found');
-  res.status(404).json({ 
+  res.status(404).json({
     ok: false,
     error: `Cannot ${req.method} ${req.path}`,
     message: 'Endpoint not found'
@@ -357,14 +169,14 @@ app.use((req, res, next) => {
 
 // -------------------- ERROR HANDLER (MUST BE LAST) ------------------
 app.use((err, req, res, next) => {
-  logger.error({ 
-    err: err.message, 
+  logger.error({
+    err: err.message,
     stack: err.stack,
     method: req.method,
     path: req.path
   }, 'Server error');
-  
-  res.status(err.status || 500).json({ 
+
+  res.status(err.status || 500).json({
     ok: false,
     error: err.message || 'Internal server error',
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
@@ -373,40 +185,32 @@ app.use((err, req, res, next) => {
 
 // -------------------- EMAIL & PDF VERIFICATION ------------------
 (async () => {
-  console.log('\n🔍 Starting service checks...\n');
-  
-  // Test email
+  logger.info('Starting service checks…');
+
   try {
     const isConfigured = await verifyEmailConfig();
     if (!isConfigured) {
-      console.log('⚠️  Email service not configured');
-      console.log('   Set EMAIL_USER and EMAIL_PASSWORD in .env file\n');
+      logger.warn('Email service not configured — set EMAIL_USER and EMAIL_PASSWORD');
     }
   } catch (err) {
-    console.error('❌ Email verification failed:', err.message);
-    console.log('   Invoice sharing will not work until email is configured\n');
+    logger.warn({ err: err.message }, 'Email verification failed — invoice sharing may not work');
   }
-  
-  // Test PDF generation
-  try {
-    const { testPuppeteer } = require('./utils/pdfGenerator');
-    await testPuppeteer();
-    console.log('');
-  } catch (err) {
-    console.error('⚠️  PDF generation test skipped:', err.message);
-    console.log('');
+
+  if (!isProduction) {
+    try {
+      const { testPuppeteer } = require('./utils/pdfGenerator');
+      await testPuppeteer();
+    } catch (err) {
+      logger.warn({ err: err.message }, 'PDF generation test skipped');
+    }
   }
 })();
 
 // -------------------- START SERVER -------------------
 app.listen(port, () => {
-  logger.info(`Invoice backend listening on port ${port}`);
-  logger.info(`APPS_SCRIPT_URL set: ${Boolean(process.env.APPS_SCRIPT_URL)}`);
-  logger.info({ allowedOrigins }, 'CORS enabled');
-  
-  console.log(`\n🚀 Server running at http://localhost:${port}`);
-  console.log(`📧 Email: ${process.env.EMAIL_USER ? '✅ Configured' : '❌ Not configured'}`);
-  console.log(`🔗 CORS allowed origins:`, allowedOrigins);
-  console.log(`\n📋 Route Test: http://localhost:${port}/api/test-routes`);
-  console.log(`📋 Projects Test: http://localhost:${port}/api/projects/PRJ_210325/setup\n`);
+  logger.info({ port, env: process.env.NODE_ENV || 'development' }, 'Invoice backend listening');
+  logger.info({ APPS_SCRIPT_URL: Boolean(process.env.APPS_SCRIPT_URL), allowedOrigins }, 'CORS enabled');
+  if (!isProduction) {
+    logger.info({ testRoutes: `http://localhost:${port}/api/test-routes` }, 'Dev routes available');
+  }
 });

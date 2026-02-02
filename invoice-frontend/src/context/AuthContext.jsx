@@ -1,5 +1,5 @@
+// src/context/AuthContext.jsx - WITH OTP TIMER SUPPORT
 
-// src/context/AuthContext.jsx
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { jwtDecode } from "jwt-decode";
 import { normalizeConsultant } from "../utils/normalizeConsultant";
@@ -11,6 +11,9 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [pendingEmail, setPendingEmail] = useState("");
+
+  // ✅ NEW: OTP Timer State
+  const [otpSentAt, setOtpSentAt] = useState(null);
 
   const API_BASE =
     import.meta.env.VITE_API_BASE || "http://localhost:4000/api";
@@ -31,7 +34,7 @@ export function AuthProvider({ children }) {
   // ======================================================
   // FETCH COMPLETE PROFILE (/auth/me)
   // ======================================================
-async function fetchCurrentUser() {
+  async function fetchCurrentUser() {
     try {
       const token = localStorage.getItem("authToken");
       if (!token) return null;
@@ -44,8 +47,6 @@ async function fetchCurrentUser() {
 
       const data = await resp.json();
 
-      console.log("RAW /auth/me RESPONSE:", data);
-
       // ✅ FIX: backend returns `consultant`, not `user`
       const rawUser = data.user || data.consultant;
 
@@ -56,8 +57,6 @@ async function fetchCurrentUser() {
       }
 
       const normalized = normalizeConsultant(rawUser);
-
-      console.log("NORMALIZED USER:", normalized);
 
       setUser(normalized);
       setIsAuthenticated(true);
@@ -70,7 +69,6 @@ async function fetchCurrentUser() {
       setLoading(false);
     }
   }
-
 
   // ======================================================
   // AFTER LOGIN / OTP SUCCESS
@@ -126,6 +124,7 @@ async function fetchCurrentUser() {
     setUser(null);
     setIsAuthenticated(false);
     setPendingEmail("");
+    setOtpSentAt(null); // ✅ Clear timer on logout
     setLoading(false);
   }
 
@@ -141,6 +140,8 @@ async function fetchCurrentUser() {
         isAuthenticated,
         pendingEmail,
         setPendingEmail,
+        otpSentAt,           // ✅ NEW: Expose timer state
+        setOtpSentAt,        // ✅ NEW: Expose timer setter
         setAuthFromToken,
         refreshUser,
         logout,

@@ -271,3 +271,14 @@
     height: 48px;
   }
 }
+.auth-countdown {
+  text-align: center;
+  font-size: 0.9rem;
+  color: #6b7280;
+  margin-top: 16px;
+}
+
+.auth-countdown strong {
+  color: #4f46e5;
+  font-weight: 600;
+}

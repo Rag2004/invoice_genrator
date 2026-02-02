@@ -55,69 +55,92 @@ export function buildInvoiceSnapshot(invoice, projectData, clientData, consultan
   // ============================================================================
   // CONSULTANT
   // ============================================================================
-  
+
   // ✅ Extract hourly rate from first item (if exists)
   const firstItem = invoice.items?.[0];
   const hourlyRate = firstItem?.rate || invoice.baseHourlyRate || 0;
-  
+
   const consultant = {
-  id: invoice.consultantId || '',
-  name: invoice.consultantName || consultantData?.Consultant_name || '',
-  email: invoice.consultantEmail || consultantData?.email || '',
-  businessName: consultantData?.business_name || consultantData?.Consultant_name || invoice.consultantName || '',
-  registeredOffice: consultantData?.business_registered_office || '',
-  pan: consultantData?.business_pan || '',
-  gstin: consultantData?.business_gstin || '',
-  cin: consultantData?.business_cin || '',
-  stateCode: consultantData?.business_state_code || '',
-  hourlyRate: hourlyRate
-};
+    id: invoice.consultantId || '',
+    name: invoice.consultantName || consultantData?.Consultant_name || consultantData?.name || '',
+    email: invoice.consultantEmail || consultantData?.email || '',
+    businessName:
+      consultantData?.business_name ||
+      consultantData?.businessName ||
+      consultantData?.Consultant_name ||
+      invoice.consultantName ||
+      '',
+    registeredOffice:
+      consultantData?.business_registered_office ||
+      consultantData?.registeredOffice ||
+      '',
+    pan:
+      consultantData?.business_pan ||
+      consultantData?.pan ||
+      '',
+    gstin:
+      consultantData?.business_gstin ||
+      consultantData?.gstin ||
+      '',
+    cin:
+      consultantData?.business_cin ||
+      consultantData?.cin ||
+      '',
+    stateCode:
+      consultantData?.business_state_code ||
+      consultantData?.stateCode ||
+      '',
+    hourlyRate: hourlyRate
+  };
   // ============================================================================
   // CLIENT
   // ============================================================================
- const client = {
-  code:
-    invoice.clientCode ||
-    clientData?.Client_Code ||
-    clientData?.code ||
-    '',
+  const client = {
+    code:
+      invoice.clientCode ||
+      clientData?.Client_Code ||
+      clientData?.code ||
+      '',
 
-  name:
-    invoice.clientName ||
-    clientData?.Client_name ||
-    clientData?.name ||
-    '',
+    name:
+      invoice.clientName ||
+      clientData?.Client_name ||
+      clientData?.name ||
+      '',
 
-  businessName:
-    invoice.businessName ||
-    clientData?.Business_Name ||      // ✅ correct spelling
-    clientData?.businessName ||
-    '',
+    businessName:
+      invoice.businessName ||
+      clientData?.Business_Name ||      // ✅ correct spelling
+      clientData?.Buisness_Name ||      // ✅ handle typo
+      clientData?.businessName ||
+      '',
 
-  billingAddress:
-    invoice.billingAddress ||
-    clientData?.Billing_Address ||
-    clientData?.billingAddress ||
-    '',
+    billingAddress:
+      invoice.billingAddress ||
+      clientData?.Billing_Address ||
+      clientData?.billingAddress ||
+      '',
 
-  pan:
-    invoice.clientPan ||
-    clientData?.Client_PAN ||
-    clientData?.pan ||
-    '',
+    pan:
+      invoice.clientPan ||
+      clientData?.Client_PAN ||
+      clientData?.pan ||
+      clientData?.PAN ||
+      '',
 
-  gstin:
-    invoice.clientGstin ||
-    clientData?.Client_GST ||
-    clientData?.gstin ||
-    '',
+    gstin:
+      invoice.clientGstin ||
+      clientData?.Client_GST ||
+      clientData?.gstin ||
+      clientData?.GSTIN ||
+      '',
 
-  stateCode:
-    invoice.clientState ||
-    clientData?.State ||
-    clientData?.stateCode ||
-    ''
-};
+    stateCode:
+      invoice.clientState ||
+      clientData?.State ||
+      clientData?.stateCode ||
+      ''
+  };
 
   // ============================================================================
   // SERVICE PROVIDER (HARDCODED CONSTANTS)
@@ -237,77 +260,4 @@ export function validateSnapshot(snapshot) {
     valid: errors.length === 0,
     errors
   };
-}
-
-
-/**
- * Debug helper - log snapshot structure
- * 
- * @param {Object} snapshot - Snapshot to debug
- * @param {string} context - Context label (e.g., "Preview", "Finalize")
- */
-export function debugSnapshot(snapshot, context = 'Snapshot') {
-  console.log('='.repeat(60));
-  console.log(`🔍 ${context.toUpperCase()} SNAPSHOT DEBUG`);
-  console.log('='.repeat(60));
-  
-  if (!snapshot) {
-    console.error('❌ Snapshot is null or undefined');
-    return;
-  }
-
-  console.log('Meta:', {
-    invoiceId: snapshot.meta?.invoiceId,
-    invoiceNumber: snapshot.meta?.invoiceNumber,
-    status: snapshot.meta?.status,
-    invoiceDate: snapshot.meta?.invoiceDate
-  });
-
-  console.log('\nProject:', {
-    projectCode: snapshot.project?.projectCode,
-    projectId: snapshot.project?.projectId
-  });
-
-  console.log('\nConsultant:', {
-    id: snapshot.consultant?.id,
-    name: snapshot.consultant?.name,
-    email: snapshot.consultant?.email
-  });
-
-  console.log('\nClient:', {
-    code: snapshot.client?.code,
-    name: snapshot.client?.name,
-    businessName: snapshot.client?.businessName
-  });
-
-  console.log('\nWork:', {
-    stagesCount: snapshot.work?.stages?.length || 0,
-    itemsCount: snapshot.work?.items?.length || 0
-  });
-
-  if (snapshot.work?.items?.length > 0) {
-    console.log('\nFirst Item:', {
-      name: snapshot.work.items[0].name,
-      mode: snapshot.work.items[0].mode,
-      hours: snapshot.work.items[0].hours,
-      amount: snapshot.work.items[0].amount
-    });
-  }
-
-  console.log('\nTotals:', {
-    subtotal: snapshot.totals?.subtotal,
-    gst: snapshot.totals?.gst,
-    total: snapshot.totals?.total
-  });
-
-  // Validation
-  const validation = validateSnapshot(snapshot);
-  if (validation.valid) {
-    console.log('\n✅ Snapshot is valid');
-  } else {
-    console.error('\n❌ Snapshot validation errors:');
-    validation.errors.forEach(err => console.error(`  - ${err}`));
-  }
-
-  console.log('='.repeat(60));
 }

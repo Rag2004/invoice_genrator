@@ -1,88 +1,11 @@
 
 // src/pages/ProfilePage.jsx
-import React, { useState } from "react";
+import React from "react";
 import '../styles/ProfilePage.css';
 import { useAuth } from "../context/AuthContext";
-import * as api from "../api/api";
 
 export default function ProfilePage() {
-  const { user, refreshUser } = useAuth();
-  const [editing, setEditing] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  // ------------------------------------------------------
-  // INITIAL FORM DATA (Mapped to your sheet columns)
-  // ------------------------------------------------------
-  const [formData, setFormData] = useState({
-    name: user?.name || "",
-    email: user?.email || "",
-    phone: user?.phone || "",
-    company: user?.businessName || "",
-    address: user?.businessRegisteredOffice || "",
-    gst: user?.businessGSTIN || "",
-    pan: user?.businessPAN || "",
-    stateCode: user?.businessStateCode || ""
-  });
-
-  // -----------------------------
-  // Handle input change
-  // -----------------------------
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-  };
-
-  // -----------------------------
-  // Submit profile update
-  // -----------------------------
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setSaving(true);
-
-    try {
-      const payload = {
-        email: user.email, // cannot change
-        name: formData.name,
-        phone: formData.phone,
-        business_name: formData.company,
-        business_registered_office: formData.address,
-        business_pan: formData.pan,
-        business_gstin: formData.gst,
-        business_state_code: formData.stateCode
-      };
-
-      const res = await api.updateConsultantProfileAction(payload);
-
-      if (!res.ok) throw new Error(res.error || "Update failed");
-
-      alert("✅ Profile updated successfully!");
-
-      await refreshUser();
-      setEditing(false);
-
-    } catch (err) {
-      console.error("Profile update failed:", err);
-      alert("❌ Failed to update profile. Try again.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // -----------------------------
-  // Cancel edit
-  // -----------------------------
-  const handleCancel = () => {
-    setFormData({
-      name: user?.name || "",
-      email: user?.email || "",
-      phone: user?.phone || "",
-      company: user?.businessName || "",
-      address: user?.businessRegisteredOffice || "",
-      gst: user?.businessGSTIN || "",
-      pan: user?.businessPAN || "",
-      stateCode: user?.businessStateCode || ""
-    });
-    setEditing(false);
-  };
+  const { user } = useAuth();
 
   return (
     <div className="profile-page">
@@ -99,145 +22,119 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* PERSONAL INFORMATION CARD */}
+        {/* PERSONAL INFORMATION CARD - READ ONLY */}
         <div className="profile-card">
           <div className="card-header">
             <h3>Personal Information</h3>
-
-            {!editing && (
-              <button className="btn-edit" onClick={() => setEditing(true)}>
-                ✏️ Edit Profile
-              </button>
-            )}
           </div>
 
-          <form onSubmit={handleSubmit}>
-            <div className="form-grid">
+          <div className="form-grid">
 
-              {/* Full Name */}
-              <div className="form-group">
-                <label>Full Name</label>
-                <input
-                  type="text"
-                  name="name"
-                  disabled={!editing}
-                  value={formData.name}
-                  onChange={handleChange}
-                  required
-                />
-              </div>
-
-              {/* Email (Locked) */}
-              <div className="form-group">
-                <label>Email (Locked)</label>
-                <input type="email" name="email" disabled value={formData.email} />
-                <small>Email cannot be changed</small>
-              </div>
-
-              {/* Phone */}
-              <div className="form-group">
-                <label>Phone Number</label>
-                <input
-                  type="tel"
-                  name="phone"
-                  disabled={!editing}
-                  value={formData.phone}
-                  onChange={handleChange}
-                />
-              </div>
-
-              {/* Company Name */}
-              <div className="form-group">
-                <label>Company Name</label>
-                <input
-                  type="text"
-                  name="company"
-                  disabled={!editing}
-                  value={formData.company}
-                  onChange={handleChange}
-                />
-              </div>
-
-              {/* GST */}
-              <div className="form-group">
-                <label>GST Number</label>
-                <input
-                  type="text"
-                  name="gst"
-                  disabled={!editing}
-                  value={formData.gst}
-                  placeholder="22AAAAA0000A1Z5"
-                  onChange={handleChange}
-                />
-              </div>
-
-              {/* PAN */}
-              <div className="form-group">
-                <label>PAN Number</label>
-                <input
-                  type="text"
-                  name="pan"
-                  disabled={!editing}
-                  value={formData.pan}
-                  placeholder="ABCDE1234F"
-                  onChange={handleChange}
-                />
-              </div>
-
-              {/* State Code */}
-              <div className="form-group">
-                <label>State Code</label>
-                <input
-                  type="text"
-                  name="stateCode"
-                  disabled={!editing}
-                  value={formData.stateCode}
-                  placeholder="Delhi (07)"
-                  onChange={handleChange}
-                />
-              </div>
-
-              {/* Address - full width */}
-              <div className="form-group form-group-full">
-                <label>Business Address</label>
-                <textarea
-                  name="address"
-                  rows="3"
-                  disabled={!editing}
-                  value={formData.address}
-                  onChange={handleChange}
-                />
-              </div>
+            {/* Full Name */}
+            <div className="form-group">
+              <label>Full Name</label>
+              <input
+                type="text"
+                disabled
+                value={user?.name || ""}
+                readOnly
+              />
             </div>
 
-            {/* ACTION BUTTONS */}
-            {editing && (
-              <div className="form-actions">
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={handleCancel}
-                  disabled={saving}
-                >
-                  Cancel
-                </button>
+            {/* Email */}
+            <div className="form-group">
+              <label>Email</label>
+              <input 
+                type="email" 
+                disabled 
+                value={user?.email || ""} 
+                readOnly
+              />
+            </div>
 
-                <button
-                  type="submit"
-                  className="btn-primary"
-                  disabled={saving}
-                >
-                  {saving ? (
-                    <>
-                      <span className="spinner"></span> Saving...
-                    </>
-                  ) : (
-                    <>💾 Save Changes</>
-                  )}
-                </button>
-              </div>
-            )}
-          </form>
+            {/* Phone */}
+            <div className="form-group">
+              <label>Phone Number</label>
+              <input
+                type="tel"
+                disabled
+                value={user?.phone || ""}
+                readOnly
+              />
+            </div>
+
+            {/* Company Name */}
+            <div className="form-group">
+              <label>Company Name</label>
+              <input
+                type="text"
+                disabled
+                value={user?.businessName || ""}
+                readOnly
+              />
+            </div>
+
+            {/* GST */}
+            <div className="form-group">
+              <label>GST Number</label>
+              <input
+                type="text"
+                disabled
+                value={user?.businessGSTIN || ""}
+                readOnly
+              />
+            </div>
+
+            {/* PAN */}
+            <div className="form-group">
+              <label>PAN Number</label>
+              <input
+                type="text"
+                disabled
+                value={user?.businessPAN || ""}
+                readOnly
+              />
+            </div>
+
+            {/* State Code */}
+            <div className="form-group">
+              <label>State Code</label>
+              <input
+                type="text"
+                disabled
+                value={user?.businessStateCode || ""}
+                readOnly
+              />
+            </div>
+
+            {/* Address - full width */}
+            <div className="form-group form-group-full">
+              <label>Business Address</label>
+              <textarea
+                rows="3"
+                disabled
+                value={user?.businessRegisteredOffice || ""}
+                readOnly
+              />
+            </div>
+          </div>
+
+          {/* INFO MESSAGE */}
+          <div style={{
+            marginTop: '20px',
+            padding: '12px 16px',
+            background: '#f0f9ff',
+            border: '1px solid #bfdbfe',
+            borderRadius: '8px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            fontSize: '14px',
+            color: '#1e40af'
+          }}>
+            <span style={{ fontSize: '18px' }}>ℹ️</span>
+            <span>Profile information is managed by admin. Contact support to update your details.</span>
+          </div>
         </div>
 
         {/* ACCOUNT INFO */}

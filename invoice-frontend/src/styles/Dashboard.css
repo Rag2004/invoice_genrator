@@ -676,6 +676,24 @@ body {
   box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
 }
 
+.btn-share:hover {
+  background: #10b981 !important;
+  border-color: #10b981 !important;
+}
+
+/* Slide-in animation for toast notifications */
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
 /* ============================================
    QUICK ACTIONS
    ============================================ */
@@ -778,7 +796,9 @@ body {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .empty-state {

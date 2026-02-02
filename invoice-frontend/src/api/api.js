@@ -1,11 +1,17 @@
-// src/api/api.js - FIXED VERSION
+// src/api/api.js - WITH CLIENT-SIDE CACHING + DEDUPLICATION
+import {
+  dedupedFetch,
+  invalidateCachePattern,
+  CACHE_KEYS,
+  CACHE_TTL
+} from '../utils/apiCache';
+
 const API_BASE =
   import.meta.env.VITE_API_BASE ||
   import.meta.env.VITE_API_URL ||
   'http://localhost:4000/api';
 
 const DEFAULT_TIMEOUT = 20000;
-// const logger = require('../utils/logger');
 
 
 // ============================================================================
@@ -34,7 +40,7 @@ async function apiGet(path, requireAuth = false, timeout = DEFAULT_TIMEOUT) {
     const token = localStorage.getItem('authToken');
     if (!token) throw new Error('No authentication token found');
     headers['Authorization'] = `Bearer ${token}`;
-    
+
     // ✅ CRITICAL: Always send consultant ID in headers
     const consultantId = getConsultantId();
     if (consultantId) {
@@ -84,7 +90,7 @@ async function apiPost(path, body = {}, requireAuth = false, timeout = DEFAULT_T
     const token = localStorage.getItem('authToken');
     if (!token) throw new Error('No authentication token found');
     headers['Authorization'] = `Bearer ${token}`;
-    
+
     // ✅ CRITICAL: Always send consultant ID in headers
     const consultantId = getConsultantId();
     if (consultantId) {
@@ -160,29 +166,42 @@ export async function logout() {
 // ============================================================================
 
 export async function getTeam() {
-  try {
-    const response = await apiGet('/team', true);
-    
-    const teamList = Array.isArray(response) ? response : (response?.team || []);
-    
-    return {
-      team: teamList.map((member) => ({
-        id: member.id || member.Id || '',
-        name: member.name || member.Name || '',
-        baseFactor: Number(member.baseFactor || member.factor || 1),
-        defaultMode: member.defaultMode || member.default_mode || 'Online',
-        rate: Number(member.rate || member.Hourly_rate || member.hourlyRate || 0),
-      }))
-    };
-  } catch (err) {
+  return dedupedFetch(
+    CACHE_KEYS.TEAM,
+    async () => {
+      const response = await apiGet('/team', true);
+      const teamList = Array.isArray(response) ? response : (response?.team || []);
+      return {
+        team: teamList.map((member) => ({
+          id: member.id || member.Id || '',
+          name: member.name || member.Name || '',
+          baseFactor: Number(member.baseFactor || member.factor || 1),
+          defaultMode: member.defaultMode || member.default_mode || 'Online',
+          rate: Number(member.rate || member.Hourly_rate || member.hourlyRate || 0),
+        }))
+      };
+    },
+    CACHE_TTL.TEAM
+  ).catch((err) => {
     console.error('Error fetching team:', err);
     return { team: [] };
-  }
+  });
 }
 
 export async function getProject(projectCode) {
   if (!projectCode) throw new Error('Project code is required');
   return apiGet(`/projects/${encodeURIComponent(projectCode)}`, true);
+}
+
+// ✅ Full invoice setup (project + client + consultant) - WITH DEDUPLICATION
+export async function getInvoiceSetup(projectCode) {
+  if (!projectCode) throw new Error('Project code is required');
+
+  return dedupedFetch(
+    CACHE_KEYS.INVOICE_SETUP(projectCode),
+    () => apiGet(`/projects/${encodeURIComponent(projectCode)}/setup`, true),
+    CACHE_TTL.INVOICE_SETUP
+  );
 }
 
 export async function getClient(clientCode) {
@@ -195,12 +214,18 @@ export async function getClient(clientCode) {
 // ============================================================================
 
 export async function createDraft(data) {
-  return apiPost('/invoices/draft', data, true);
+  const result = await apiPost('/invoices/draft', data, true);
+  // ✅ Invalidate invoices cache after creating draft
+  invalidateCachePattern('invoices:');
+  return result;
 }
 
 export async function updateDraft(invoiceId, data) {
   if (!invoiceId) throw new Error('Invoice ID is required');
-  return apiPost(`/invoices/draft/${encodeURIComponent(invoiceId)}`, data, true, 20000);
+  const result = await apiPost(`/invoices/draft/${encodeURIComponent(invoiceId)}`, data, true, 20000);
+  // ✅ Invalidate invoices cache after updating draft
+  invalidateCachePattern('invoices:');
+  return result;
 }
 
 export async function listDrafts(consultantId) {
@@ -211,25 +236,25 @@ export async function listDrafts(consultantId) {
       return { ok: false, drafts: [], error: 'consultantId is required' };
     }
   }
-  
+
   try {
     const result = await apiGet(`/drafts/consultant/${encodeURIComponent(consultantId)}`, true, 15000);
-    
+
     if (result && result.ok && Array.isArray(result.drafts)) {
       return result;
     }
-    
+
     if (result && Array.isArray(result.drafts)) {
       return { ok: true, drafts: result.drafts };
     }
-    
+
     if (Array.isArray(result)) {
       return { ok: true, drafts: result };
     }
-    
+
     console.warn('Unexpected drafts response format:', result);
     return { ok: true, drafts: [] };
-    
+
   } catch (err) {
     console.error('Error listing drafts:', err);
     return { ok: false, drafts: [], error: err.message };
@@ -253,53 +278,49 @@ export async function getInvoice(invoiceId) {
 
 
 export async function finalizeInvoice(data) {
-  return apiPost('/invoices/finalize', data, true, 30000);
+  const result = await apiPost('/invoices/finalize', data, true, 30000);
+  // ✅ Invalidate invoices cache after finalizing
+  invalidateCachePattern('invoices:');
+  return result;
 }
 
-// ✅ FIXED: Now includes consultantId automatically
-// In api.js - Update this function
+// ✅ List invoices - WITH DEDUPLICATION
 export async function listInvoices(limit = 50, consultantId = null) {
   const safeLimit = Math.min(limit, 100);
-  
-  // If not provided, try to get from localStorage
+
   if (!consultantId) {
     consultantId = getConsultantId();
   }
-  
+
   if (!consultantId) {
     console.error('❌ Missing consultantId in listInvoices');
     return { ok: false, invoices: [], error: 'consultantId required' };
   }
-  
-  console.log('📋 Fetching invoices for consultant:', consultantId);
-  
-  try {
-    const result = await apiGet(
-      `/invoices?limit=${safeLimit}&consultantId=${encodeURIComponent(consultantId)}`, 
-      true, 
-      15000
-    );
-    
-    console.log('✅ Invoices API response:', result);
-    if (result?.ok && Array.isArray(result.invoices)) {
-  return result;
-}
 
-if (Array.isArray(result)) {
-  return { ok: true, invoices: result };
-}
+  return dedupedFetch(
+    CACHE_KEYS.INVOICES(consultantId),
+    async () => {
+      const result = await apiGet(
+        `/invoices?limit=${safeLimit}&consultantId=${encodeURIComponent(consultantId)}`,
+        true,
+        15000
+      );
 
-if (Array.isArray(result?.invoices)) {
-  return { ok: true, invoices: result.invoices };
-}
-
-return { ok: true, invoices: [] };
-
-    
-  } catch (err) {
+      if (result?.ok && Array.isArray(result.invoices)) {
+        return result;
+      } else if (Array.isArray(result)) {
+        return { ok: true, invoices: result };
+      } else if (Array.isArray(result?.invoices)) {
+        return { ok: true, invoices: result.invoices };
+      } else {
+        return { ok: true, invoices: [] };
+      }
+    },
+    CACHE_TTL.INVOICES
+  ).catch((err) => {
     console.error('❌ Error listing invoices:', err);
     return { ok: false, invoices: [], error: err.message };
-  }
+  });
 }
 
 // export async function getInvoiceById(invoiceId) {
@@ -316,14 +337,14 @@ export async function sendInvoiceEmail(data) {
   return apiPost('/invoices/send-email', data, true);
 }
 
-export async function shareInvoice({ 
+export async function shareInvoice({
   invoiceId,  // ✅ Required
   html,       // ✅ Required
   projectCode,
   consultantName,
   total,
   subtotal,
-  gst 
+  gst
 }) {
   // ✅ VALIDATION: Invoice ID required (no sharing unsaved drafts)
   if (!invoiceId) {
@@ -334,12 +355,6 @@ export async function shareInvoice({
   if (!html) {
     throw new Error('Invoice HTML is required');
   }
-
-  console.log('📤 Sharing invoice:', {
-    invoiceId,
-    htmlLength: html.length,
-    projectCode
-  });
 
   try {
     // ✅ SECURITY: No toEmail parameter - backend fetches from invoice data
@@ -352,10 +367,8 @@ export async function shareInvoice({
       subtotal,           // Optional context
       gst,                // Optional context
     }, true, 30000);
-
-    console.log('✅ Share API response:', result);
     return result;
-    
+
   } catch (err) {
     console.error('❌ Share API error:', err);
     throw err;
@@ -382,7 +395,7 @@ export async function getDashboardSummary(consultantId) {
       };
     }
   }
-  
+
   try {
     return await apiGet(`/dashboard/summary?consultantId=${encodeURIComponent(consultantId)}`, true, 15000);
   } catch (err) {
@@ -420,7 +433,7 @@ export async function getDashboardData(consultantId) {
       };
     }
   }
-  
+
   try {
     const [summary, recentInvoices] = await Promise.allSettled([
       getDashboardSummary(consultantId),
@@ -435,9 +448,9 @@ export async function getDashboardData(consultantId) {
         paidInvoices: 0,
         recentInvoices: []
       },
-      recentInvoices: recentInvoices.status === 'fulfilled' ? recentInvoices.value : { 
-        ok: true, 
-        invoices: [] 
+      recentInvoices: recentInvoices.status === 'fulfilled' ? recentInvoices.value : {
+        ok: true,
+        invoices: []
       },
       errors: {
         summary: summary.status === 'rejected' ? summary.reason?.message : null,
@@ -478,7 +491,7 @@ export async function getInvoicesData(consultantId, limit = 50) {
       };
     }
   }
-  
+
   try {
     const [finalInvoices, drafts] = await Promise.allSettled([
       listInvoices(limit, consultantId),
@@ -486,11 +499,11 @@ export async function getInvoicesData(consultantId, limit = 50) {
     ]);
 
     return {
-      final: finalInvoices.status === 'fulfilled' && finalInvoices.value 
-        ? finalInvoices.value 
+      final: finalInvoices.status === 'fulfilled' && finalInvoices.value
+        ? finalInvoices.value
         : { ok: true, invoices: [] },
       drafts: drafts.status === 'fulfilled' && drafts.value
-        ? drafts.value 
+        ? drafts.value
         : { ok: true, drafts: [] },
       errors: {
         final: finalInvoices.status === 'rejected' ? finalInvoices.reason?.message : null,
@@ -507,5 +520,33 @@ export async function getInvoicesData(consultantId, limit = 50) {
         drafts: err.message,
       }
     };
+  }
+}
+/**
+ * Auto-share invoice - Simplified share that only needs invoiceId
+ * Backend fetches invoice, generates HTML, and sends to client email
+ */
+export async function autoShareInvoice(invoiceId) {
+  if (!invoiceId) {
+    throw new Error('Invoice ID is required');
+  }
+
+  try {
+    const result = await apiPost('/invoices/share-auto', {
+      invoiceId
+    }, true, 30000);
+
+    return {
+      success: true,
+      ok: true,
+      sentTo: result.sentTo,
+      hasPDF: result.hasPDF,
+      filename: result.filename,
+      messageId: result.messageId
+    };
+
+  } catch (error) {
+    console.error('❌ Auto-share error:', error);
+    throw error;
   }
 }

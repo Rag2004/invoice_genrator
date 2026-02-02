@@ -7,15 +7,6 @@ import { useAuth } from '../../context/AuthContext';
 export default function ProtectedRoute({ children, requireProfileSetup = false }) {
   const { user, loading, isAuthenticated, needsProfile } = useAuth();
 
-  console.log('🛡️ ProtectedRoute check:', {
-    user: user
-      ? { id: user.id, name: user.name, email: user.email }
-      : null,
-    loading,
-    isAuthenticated,
-    needsProfile,
-  });
-
   // While auth is being checked
   if (loading) {
     return (
@@ -46,27 +37,22 @@ export default function ProtectedRoute({ children, requireProfileSetup = false }
 
   // Not logged in at all → go to login
   if (!isAuthenticated) {
-    console.log('❌ Not authenticated, redirecting to /login');
     return <Navigate to="/login" replace />;
   }
 
   // This route is ONLY for users who still need to set up profile
   if (requireProfileSetup) {
     if (!needsProfile) {
-      console.log('🛡️ Profile already complete → redirecting to /dashboard');
       return <Navigate to="/dashboard" replace />;
     }
-    console.log('🛡️ Logged in + needsProfile → allow profile setup page');
     return children;
   }
 
   // Normal protected routes (dashboard etc.). If profile not complete, push them to setup.
   if (needsProfile) {
-    console.log('🛡️ Needs profile → redirecting to /setup-profile');
     return <Navigate to="/setup-profile" replace />;
   }
 
   // Fully authenticated + profile complete → show protected content
-  console.log('✅ Authenticated, rendering protected content');
   return children;
 }

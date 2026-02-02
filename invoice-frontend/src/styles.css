@@ -154,9 +154,17 @@ body {
 }
 
 /* Stagger card animations */
-.card:nth-child(1) { animation-delay: 0.05s; }
-.card:nth-child(2) { animation-delay: 0.1s; }
-.card:nth-child(3) { animation-delay: 0.15s; }
+.card:nth-child(1) {
+  animation-delay: 0.05s;
+}
+
+.card:nth-child(2) {
+  animation-delay: 0.1s;
+}
+
+.card:nth-child(3) {
+  animation-delay: 0.15s;
+}
 
 /* ==================== FORM ELEMENTS ==================== */
 .form-group {
@@ -218,6 +226,18 @@ body {
   color: var(--gray-800);
   font-weight: 600;
   cursor: default;
+}
+
+/* Hide number input spinners for cleaner look */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
 }
 
 .form-row {
@@ -362,7 +382,8 @@ body {
 /* ==================== FOOTER ACTIONS ==================== */
 .footer-actions {
   position: fixed;
-  left: 344px; /* Sidebar width */
+  left: 344px;
+  /* Sidebar width */
   right: 0;
   bottom: 0;
   background: #ffffff;
@@ -411,7 +432,8 @@ body {
 
 @media (max-width: 1024px) {
   .footer-actions {
-    left: 280px; /* Smaller sidebar on tablets */
+    left: 280px;
+    /* Smaller sidebar on tablets */
   }
 }
 
@@ -432,7 +454,7 @@ body {
   .btn {
     width: 100%;
   }
-  
+
   .footer-total {
     width: 100%;
     justify-content: space-between;
@@ -451,11 +473,25 @@ body {
   font-size: 0.875rem;
 }
 
-.success { color: var(--success); }
-.error { color: var(--danger); }
-.mt-2 { margin-top: 12px; }
-.mb-2 { margin-bottom: 12px; }
-.text-right { text-align: right; }
+.success {
+  color: var(--success);
+}
+
+.error {
+  color: var(--danger);
+}
+
+.mt-2 {
+  margin-top: 12px;
+}
+
+.mb-2 {
+  margin-bottom: 12px;
+}
+
+.text-right {
+  text-align: right;
+}
 
 /* ==================== ANIMATIONS ==================== */
 @keyframes fadeInDown {
@@ -463,6 +499,7 @@ body {
     opacity: 0;
     transform: translateY(-20px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -474,6 +511,7 @@ body {
     opacity: 0;
     transform: translateY(20px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -497,6 +535,7 @@ body {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
 }
+
 /* =========================================================
    HOURLX INVOICE GENERATOR - PRODUCTION STYLES
    Part 2: Specialized Components, Invoice Tables & Print
@@ -612,6 +651,63 @@ body {
   border: 1px solid var(--gray-200);
   background: var(--gray-50);
   overflow-x: auto;
+}
+
+/* Custom scrollbar styling for scrollable areas */
+.work-table-wrapper-main::-webkit-scrollbar,
+.scope-section::-webkit-scrollbar,
+.scope-section>div::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+
+.work-table-wrapper-main::-webkit-scrollbar-track,
+.scope-section::-webkit-scrollbar-track,
+.scope-section>div::-webkit-scrollbar-track {
+  background: var(--gray-100);
+  border-radius: 4px;
+}
+
+.work-table-wrapper-main::-webkit-scrollbar-thumb,
+.scope-section::-webkit-scrollbar-thumb,
+.scope-section>div::-webkit-scrollbar-thumb {
+  background: var(--gray-300);
+  border-radius: 4px;
+  transition: background 0.2s ease;
+}
+
+.work-table-wrapper-main::-webkit-scrollbar-thumb:hover,
+.scope-section::-webkit-scrollbar-thumb:hover,
+.scope-section>div::-webkit-scrollbar-thumb:hover {
+  background: var(--gray-400);
+}
+
+/* Firefox scrollbar */
+.work-table-wrapper-main,
+.scope-section,
+.scope-section>div,
+.substage-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--gray-300) var(--gray-100);
+}
+
+/* Sub-stage scroll area */
+.substage-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+
+.substage-scroll::-webkit-scrollbar-track {
+  background: var(--gray-100);
+  border-radius: 3px;
+}
+
+.substage-scroll::-webkit-scrollbar-thumb {
+  background: var(--gray-300);
+  border-radius: 3px;
+}
+
+.substage-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--gray-400);
 }
 
 .work-table-main {
@@ -848,7 +944,7 @@ body {
   color: var(--gray-600);
 }
 
-.mi-team-table tbody tr + tr {
+.mi-team-table tbody tr+tr {
   border-top: 1px solid var(--gray-100);
 }
 
@@ -897,7 +993,7 @@ body {
   }
 
   /* Hide everything except print content */
-  body > *:not(.print-only-content) {
+  body>*:not(.print-only-content) {
     display: none !important;
   }
 
@@ -1078,6 +1174,7 @@ body {
 
 /* ==================== RESPONSIVE ==================== */
 @media (max-width: 640px) {
+
   .auth-card,
   .login-card {
     padding: 2rem 1.5rem;
@@ -1091,6 +1188,7 @@ body {
     overflow-x: scroll;
   }
 }
+
 /* ===== Invoice Info Grid ===== */
 .invoice-section {
   margin-bottom: 18px;
@@ -1136,7 +1234,11 @@ body {
     gap: 8px;
   }
 }
-.compact-card { padding: 16px; margin-bottom: 16px; }
+
+.compact-card {
+  padding: 16px;
+  margin-bottom: 16px;
+}
 
 .section-title {
   font-size: 15px;
@@ -1150,14 +1252,16 @@ body {
   gap: 12px;
 }
 
-.readonly-box, .field {
+.readonly-box,
+.field {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   padding: 10px 12px;
   background: #fff;
 }
 
-.readonly-box label, .field label {
+.readonly-box label,
+.field label {
   font-size: 11px;
   color: #6b7280;
   display: block;
@@ -1194,6 +1298,7 @@ body {
   border-top: 1px solid #e5e7eb;
   margin: 8px 0;
 }
+
 /* ==================== NEW STYLES FOR INVOICE GENERATOR ==================== */
 
 /* 1️⃣ Top Bar */
@@ -1231,11 +1336,11 @@ body {
 }
 
 /* Card Spacing */
-.app-shell > .card {
+.app-shell>.card {
   margin-bottom: 16px;
 }
 
-.app-shell > .card:last-of-type {
+.app-shell>.card:last-of-type {
   margin-bottom: 0;
 }
 
@@ -1271,7 +1376,7 @@ body {
   color: #991b1b;
   padding: 12px 16px;
   border-radius: 8px;
-  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
   z-index: 9999;
   max-width: 300px;
   font-size: 0.875rem;
@@ -1372,7 +1477,8 @@ body {
   color: var(--gray-700);
 }
 
-.input, .textarea {
+.input,
+.textarea {
   width: 100%;
   box-sizing: border-box;
 }
@@ -1384,6 +1490,7 @@ body {
 
 /* Responsive adjustments */
 @media (max-width: 768px) {
+
   .ProjectLookup,
   .ConsultantDetails,
   .ClientDetails,
@@ -1392,7 +1499,7 @@ body {
     grid-template-columns: 1fr !important;
     gap: 12px !important;
   }
-  
+
   .TopBar {
     flex-direction: column;
     align-items: flex-start;
@@ -1400,32 +1507,33 @@ body {
     height: auto;
     padding: 12px;
   }
-  
+
   .topbar-controls {
     width: 100%;
     justify-content: space-between;
   }
-  
+
   .footer-actions {
     flex-direction: column;
     gap: 12px;
     align-items: stretch;
   }
-  
+
   .footer-actions .left,
   .footer-actions .right {
     display: flex;
     gap: 8px;
   }
-  
+
   .footer-actions .left {
     justify-content: flex-start;
   }
-  
+
   .footer-actions .right {
     justify-content: flex-end;
   }
 }
+
 /* Container for the Title + Blue Bar */
 .section-header-row {
   display: flex;
@@ -1439,7 +1547,8 @@ body {
 .blue-accent-bar {
   width: 4px;
   height: 24px;
-  background-color: #3b82f6; /* Adjust to match your exact blue */
+  background-color: #3b82f6;
+  /* Adjust to match your exact blue */
   border-radius: 2px;
 }
 
@@ -1498,6 +1607,7 @@ body {
   color: #cbd5e1;
   font-weight: 400;
 }
+
 /* Disabled button styling */
 .btn:disabled {
   opacity: 0.5;

@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { listInvoices } from '../api/api';
+import { listInvoices, getInvoice, sendInvoiceEmail } from '../api/api';
 import '../styles/Dashboard.css';
 
 function DashboardCard({ title, value, subtitle, icon }) {
@@ -28,7 +28,7 @@ function DashboardCard({ title, value, subtitle, icon }) {
 export default function DashboardHome() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  
+
   const [consultantName, setConsultantName] = useState('');
   const [allInvoices, setAllInvoices] = useState([]);
   const [stats, setStats] = useState({
@@ -38,6 +38,8 @@ export default function DashboardHome() {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [sharing, setSharing] = useState(null); // Track which invoice is being shared
+  const [shareMessage, setShareMessage] = useState(null);
 
   useEffect(() => {
     let mounted = true;
@@ -49,29 +51,26 @@ export default function DashboardHome() {
 
         // ✅ Extract consultantId with detailed logging
         const consultantId = user?.consultantId || user?.consultant_id || user?.id;
-        
-        console.log('🔍 User object:', user);
-        console.log('🔍 Extracted consultantId:', consultantId);
-        
+
         if (!consultantId) {
           throw new Error('Missing consultant ID from user object');
         }
 
         setConsultantName(user?.name || user?.consultantName || 'User');
 
-        console.log('📊 Loading dashboard for consultant:', consultantId);
+
 
         // ✅ Pass consultantId explicitly to the API
         const result = await listInvoices(100, consultantId);
 
         if (!mounted) return;
 
-        console.log('✅ API Response:', result);
+
 
         // Normalize invoices
         const invoices = (result?.invoices || []).map(inv => {
           const status = String(inv.status || 'DRAFT').toUpperCase();
-          
+
           return {
             id: inv.invoiceId || inv.id,
             invoiceNumber: inv.invoiceNumber || 'DRAFT',
@@ -83,10 +82,10 @@ export default function DashboardHome() {
           };
         });
 
-        console.log('📊 Normalized invoices:', invoices);
+
 
         // Sort by date (newest first)
-        const sorted = invoices.sort((a, b) => 
+        const sorted = invoices.sort((a, b) =>
           new Date(b.updatedAt) - new Date(a.updatedAt)
         );
 
@@ -96,11 +95,7 @@ export default function DashboardHome() {
         const drafts = sorted.filter(i => i.status === 'DRAFT');
         const finals = sorted.filter(i => i.status === 'FINAL');
 
-        console.log('📊 Stats:', {
-          total: sorted.length,
-          drafts: drafts.length,
-          finals: finals.length
-        });
+
 
         setStats({
           total: sorted.length,
@@ -110,7 +105,7 @@ export default function DashboardHome() {
 
       } catch (err) {
         if (!mounted) return;
-        console.error('❌ Dashboard load error:', err);
+
         setError(err.message || 'Failed to load dashboard');
       } finally {
         if (mounted) {
@@ -168,6 +163,48 @@ export default function DashboardHome() {
     }
   }
 
+  // ✅ Share invoice via email
+  async function handleShare(invoice) {
+    if (invoice.status !== 'FINAL') {
+      setShareMessage({ type: 'error', text: 'Only finalized invoices can be shared' });
+      setTimeout(() => setShareMessage(null), 3000);
+      return;
+    }
+
+    try {
+      setSharing(invoice.id);
+      setShareMessage(null);
+
+      // Fetch full invoice data
+      const fullInvoice = await getInvoice(invoice.id);
+      const data = fullInvoice?.invoice?.invoice || fullInvoice?.invoice || fullInvoice;
+
+      if (!data) {
+        throw new Error('Could not load invoice data');
+      }
+
+      // Send email
+      await sendInvoiceEmail({
+        invoiceId: invoice.id,
+        invoiceNumber: data.invoiceNumber || invoice.invoiceNumber,
+        projectCode: data.projectCode || invoice.projectCode,
+        toEmail: data.clientEmail || data.toEmail,
+        consultantName: data.consultantName,
+        subtotal: data.subtotal,
+        total: data.total,
+      });
+
+      setShareMessage({ type: 'success', text: `Invoice ${invoice.invoiceNumber} shared successfully!` });
+      setTimeout(() => setShareMessage(null), 4000);
+
+    } catch (err) {
+      setShareMessage({ type: 'error', text: err.message || 'Failed to share invoice' });
+      setTimeout(() => setShareMessage(null), 4000);
+    } finally {
+      setSharing(null);
+    }
+  }
+
   if (loading) {
     return (
       <div className="loading-container">
@@ -196,6 +233,28 @@ export default function DashboardHome() {
 
   return (
     <div className="dashboard-home">
+      {shareMessage && (
+        <div style={{
+          position: 'fixed',
+          top: '24px',
+          right: '24px',
+          padding: '14px 24px',
+          borderRadius: '12px',
+          zIndex: 1000,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          fontSize: '14px',
+          fontWeight: '500',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+          animation: 'slideIn 0.3s ease',
+          background: shareMessage.type === 'success' ? '#10b981' : '#ef4444',
+          color: 'white',
+        }}>
+          {shareMessage.type === 'success' ? '✅' : '❌'} {shareMessage.text}
+        </div>
+      )}
+
       {error && allInvoices.length > 0 && (
         <div style={{
           background: '#fef3c7',
@@ -282,6 +341,20 @@ export default function DashboardHome() {
                       >
                         {invoice.status === 'DRAFT' ? '✏️' : '👁️'}
                       </button>
+                      {invoice.status === 'FINAL' && (
+                        <button
+                          className="btn-icon btn-share"
+                          title="Share via Email"
+                          onClick={() => handleShare(invoice)}
+                          disabled={sharing === invoice.id}
+                          style={{
+                            background: sharing === invoice.id ? '#e0e7ff' : '#f3f4f6',
+                            opacity: sharing === invoice.id ? 0.7 : 1,
+                          }}
+                        >
+                          {sharing === invoice.id ? '⏳' : '📧'}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
