@@ -176,7 +176,7 @@ export async function getTeam() {
           id: member.id || member.Id || '',
           name: member.name || member.Name || '',
           baseFactor: Number(member.baseFactor || member.factor || 1),
-          defaultMode: member.defaultMode || member.default_mode || 'Online',
+          defaultMode: member.defaultMode || member.DefaultMode || member.default_mode || 'Online',
           rate: Number(member.rate || member.Hourly_rate || member.hourlyRate || 0),
         }))
       };
@@ -186,6 +186,36 @@ export async function getTeam() {
     console.error('Error fetching team:', err);
     return { team: [] };
   });
+}
+
+// ✅ Clear team cache to force refresh
+export function clearTeamCache() {
+  invalidateCachePattern('team');
+}
+
+// ✅ Get consultation modes with factors
+export async function getModes() {
+  try {
+    const response = await apiGet('/modes', true);
+    const modesList = Array.isArray(response) ? response : (response?.modes || []);
+    return {
+      modes: modesList.map((mode) => ({
+        label: mode.label || mode.mode || mode.Mode || '',
+        factor: Number(mode.factor || mode.Factor || 1),
+        description: mode.description || mode.Description || '',
+      }))
+    };
+  } catch (err) {
+    console.error('Error fetching modes:', err);
+    // Return default modes as fallback
+    return {
+      modes: [
+        { label: 'Online | Face-Time', factor: 1 },
+        { label: 'Offline | Studio-Time', factor: 0.75 },
+        { label: 'Offline | Site-Time', factor: 1.5 },
+      ]
+    };
+  }
 }
 
 export async function getProject(projectCode) {

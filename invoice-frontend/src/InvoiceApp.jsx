@@ -8,7 +8,7 @@ import InvoiceComplete from './components/InvoiceComplete';
 import ShareInvoiceDialog from './components/ui/ShareInvoiceDialog';
 import InvoicePreviewModal from './components/InvoicePreviewModal';
 
-import { getTeam, getInvoiceSetup, shareInvoice, createDraft, updateDraft, finalizeInvoice, getInvoice } from './api/api';
+import { getTeam, getInvoiceSetup, shareInvoice, createDraft, updateDraft, finalizeInvoice, getInvoice, getModes, clearTeamCache } from './api/api';
 import { useAuth } from './context/AuthContext';
 import { LOGO_URL } from "./config/branding";
 
@@ -152,6 +152,7 @@ export default function Invoice() {
   const [consultantData, setConsultantData] = useState(null);
   const [loadingProject, setLoadingProject] = useState(false);
   const [loadingDraft, setLoadingDraft] = useState(false);
+  const [modesOptions, setModesOptions] = useState([]);
 
   const [isSaving, setIsSaving] = useState(false);
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
@@ -197,26 +198,52 @@ export default function Invoice() {
   };
 
   /* ============================================================================
-     ✅ LOAD TEAM OPTIONS
+     ✅ LOAD TEAM OPTIONS - Now stores all rows and groups by member name
   ============================================================================ */
 
+  // Store all team rows (each row = one member + mode + factor combination)
+  const [teamAllRows, setTeamAllRows] = useState([]);
+
   useEffect(() => {
+    // Clear cache to get fresh team data
+    clearTeamCache();
+
     getTeam()
       .then((res) => {
         const list = Array.isArray(res) ? res : (res?.team || []);
 
+        // Store ALL rows - each row has member name, mode, and factor
+        const allRows = list.map((x) => ({
+          id: x.id || x.Id || '',
+          name: x.name || x.Name || '',
+          factor: Number(x.baseFactor || x.factor || x.Factor || 1),
+          mode: x.defaultMode || x.DefaultMode || 'Online | Face-Time',
+        }));
+
+        setTeamAllRows(allRows);
+
+        // Extract UNIQUE member names for the team member dropdown
+        const uniqueNames = [...new Set(allRows.map(r => r.name).filter(n => n))];
         setTeamOptions(
-          list.map((x) => ({
-            id: x.id || x.Id || '',
-            name: x.name || x.Name || '',
-            baseFactor: Number(x.baseFactor || x.factor || x.Factor || 1),
-          }))
+          uniqueNames.map((name) => {
+            // Get first row for this member to use as default
+            const firstRow = allRows.find(r => r.name === name);
+            return {
+              id: firstRow?.id || '',
+              name: name,
+              baseFactor: firstRow?.factor || 1,
+              defaultMode: firstRow?.mode || 'Online | Face-Time',
+            };
+          })
         );
       })
       .catch((err) => {
         console.error('Failed to load team:', err);
         setTeamOptions([]);
+        setTeamAllRows([]);
       });
+
+    // No need to load modes separately - modes come from team rows
   }, []);
 
   /* ============================================================================
@@ -1068,6 +1095,7 @@ export default function Invoice() {
             invoice={invoice}
             updateInvoice={updateInvoice}
             teamOptions={teamOptions}
+            teamAllRows={teamAllRows}
             baseHourlyRate={invoice.baseHourlyRate}
             showOnlyStages={true}
           />
@@ -1091,6 +1119,7 @@ export default function Invoice() {
             invoice={invoice}
             updateInvoice={updateInvoice}
             teamOptions={teamOptions}
+            teamAllRows={teamAllRows}
             baseHourlyRate={invoice.baseHourlyRate}
             showOnlyTable={true}
           />

@@ -40,17 +40,25 @@ export default function TeamSummary({
   invoice,
   updateInvoice,
   teamOptions,
+  teamAllRows = [],  // All team rows from sheet (each row = name + mode + factor)
   loadingTeam,
   baseHourlyRate,
   showOnlyStages = false,  // NEW: Show only stages section
   showOnlyTable = false,   // NEW: Show only table section
 }) {
-  const consultationModes = [
-    'Online | Face-Time',
-    'Online | Studio-Time',
-    'Offline | Face-Time',
-    'Offline | Studio-Time',
-  ];
+  // Helper: Get all modes available for a specific team member
+  const getModesForMember = (memberName) => {
+    if (!memberName || !teamAllRows.length) return [];
+    return teamAllRows
+      .filter(row => row.name === memberName)
+      .map(row => ({
+        label: row.mode,
+        factor: row.factor,
+      }));
+  };
+
+  // Get all unique modes across all members (for fallback)
+  const allUniqueModes = [...new Set(teamAllRows.map(r => r.mode))].filter(m => m);
 
   const stages = (invoice.stages || []).map((s, stageIndex) => ({
     ...s,
@@ -94,7 +102,12 @@ export default function TeamSummary({
       return;
     }
 
-    const factor = Number(firstMember?.baseFactor || firstMember?.factor || 1);
+    // Get modes available for this member from the sheet
+    const memberModes = getModesForMember(firstMember.name);
+    const firstMode = memberModes[0] || { label: 'Online | Face-Time', factor: 1 };
+
+    // Use the factor from the selected mode row
+    const factor = firstMode.factor;
     const rate = Math.round((baseHourlyRate || 0) * factor);
 
     const stageHours = {};
@@ -113,8 +126,8 @@ export default function TeamSummary({
       id: Date.now(),
       memberId: firstMember.id,
       name: firstMember.name || 'Studio Team',
-      mode: consultationModes[0] || 'Online | Face-Time',
-      factor,
+      mode: firstMode.label,
+      factor,  // Factor from the specific mode row
       rate,
       hours: totalHours,
       amount,
@@ -229,7 +242,13 @@ export default function TeamSummary({
           const member = teamOptions.find((m) => m.name === value);
 
           if (member) {
-            const factor = member.baseFactor || member.factor || 1;
+            // Get modes available for this member from the sheet
+            const memberModes = getModesForMember(member.name);
+            const firstMode = memberModes[0] || { label: 'Online | Face-Time', factor: 1 };
+
+            // Use the factor from the member's first/default mode
+            const factor = firstMode.factor;
+
             next.factor = factor;
             next.memberId = member.id;
 
@@ -240,6 +259,31 @@ export default function TeamSummary({
 
             return {
               ...next,
+              mode: firstMode.label,
+              rate,
+              hours: totalHours,
+              amount,
+              userEditedRate: false,
+            };
+          }
+        }
+
+        // Mode change - look up the factor for this specific mode from teamAllRows
+        if (field === 'mode') {
+          // Find the row that matches this member + this mode
+          const memberModes = getModesForMember(next.name);
+          const selectedMode = memberModes.find(m => m.label === value);
+
+          if (selectedMode) {
+            const factor = selectedMode.factor;
+            const rate = Math.round((baseHourlyRate || 0) * factor);
+            const stageHours = next.stageHours || {};
+            const totalHours = calcTotalHoursFromMap(stageHours);
+            const amount = Math.round(rate * totalHours);
+
+            return {
+              ...next,
+              factor,
               rate,
               hours: totalHours,
               amount,
@@ -798,9 +842,9 @@ export default function TeamSummary({
                             onChange={(e) => updateTeamMember(item.id, 'mode', e.target.value)}
                             style={{ width: '100%', minWidth: '110px' }}
                           >
-                            {consultationModes.map((mode) => (
-                              <option key={mode} value={mode}>
-                                {mode}
+                            {getModesForMember(item.name).map((modeObj, mIdx) => (
+                              <option key={`${modeObj.label}-${mIdx}`} value={modeObj.label}>
+                                {modeObj.label}
                               </option>
                             ))}
                           </select>
