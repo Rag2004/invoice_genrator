@@ -53,17 +53,17 @@ export default function InvoiceComplete({ invoice = {}, logoUrl = "" }) {
   const projectId = project.projectCode || "";
   const clientId = client.code || "";
   const consultantDisplayName = consultant.name || "";
-  
+
   // ✅ FIX: Show hourly rate, not subtotal
   const consultantHourlyRate = consultant.hourlyRate || items[0]?.rate || 0;
   const consultantFee = formatINR(consultantHourlyRate);
-  
+
   const sacCode = compliance.sacCode || "";
   const supplyDescription = compliance.supplyDescription || "";
   const subtotal = totals.subtotal || 0;
   const gst = totals.gst || 0;
   const total = totals.total || 0;
-  
+
   // ✅ Helper to check if value is truly empty (handles "", null, undefined)
   const isEmpty = (val) => val === "" || val === null || val === undefined;
 
@@ -77,13 +77,13 @@ export default function InvoiceComplete({ invoice = {}, logoUrl = "" }) {
     businessGstin: consultant.gstin || "",
     businessStateCode: consultant.stateCode || "",
   };
-  
+
   // ✅ Check if fields are truly empty (not just falsy)
   const hasConsultantOffice = !isEmpty(consultantBusiness.businessRegisteredOffice);
   const hasConsultantState = !isEmpty(consultantBusiness.businessStateCode);
   const hasConsultantPan = !isEmpty(consultantBusiness.businessPan);
   const hasConsultantGstin = !isEmpty(consultantBusiness.businessGstin);
-  
+
   const hasClientAddress = !isEmpty(client.billingAddress);
   const hasClientState = !isEmpty(client.stateCode);
   const hasClientPan = !isEmpty(client.pan);
@@ -564,7 +564,7 @@ export default function InvoiceComplete({ invoice = {}, logoUrl = "" }) {
 
         {/* ==================== HOURLY VENTURES LLP ==================== */}
         <div className="section-modern">
-          <div className="section-header-modern">HOURLY VENTURES LLP</div>
+          <div className="section-header-modern">{hourlyVentures.companyName || "HOURLY VENTURES LLP"}</div>
           <div className="section-body-modern compact">
             <div className="info-grid-modern triple">
               <div className="info-item-modern">
@@ -723,13 +723,13 @@ export default function InvoiceComplete({ invoice = {}, logoUrl = "" }) {
                 <div className="stages-grid-header">Sr. No.</div>
                 <div className="stages-grid-header">Inclusions / Description</div>
                 <div className="stages-grid-header center">Timeline (Days)</div>
-                
+
                 {stages.map((stage, idx) => {
                   const subStagesText = (stage?.subStages || [])
                     .map(x => x?.label || x?.name)
                     .filter(Boolean)
                     .join(", ");
-                  
+
                   return (
                     <React.Fragment key={idx}>
                       <div className="stages-grid-cell center strong">{idx + 1}.</div>
@@ -774,7 +774,7 @@ export default function InvoiceComplete({ invoice = {}, logoUrl = "" }) {
                   <tbody>
                     {items.map((item, idx) => {
                       const stageHours = item?.stageHours || {};
-                      
+
                       return (
                         <tr key={idx}>
                           <td className="center">{idx + 1}</td>
@@ -809,7 +809,7 @@ export default function InvoiceComplete({ invoice = {}, logoUrl = "" }) {
                       )}
                     </div>
                   </div>
-                  
+
                   <div className="totals-box-modern">
                     <div className="totals-row-modern">
                       <div className="totals-label-modern">Subtotal</div>
@@ -837,26 +837,26 @@ export default function InvoiceComplete({ invoice = {}, logoUrl = "" }) {
             )}
           </div>
         </div>
-             {/* ==================== TERMS & CONDITIONS ==================== */}
-         <div className="section-modern">
-           <div className="section-header-modern">TERMS AND CONDITIONS</div>
-           <div className="section-body-modern compact">
-             <div className="terms-text-modern">
-               <p>As per Agreement</p>
-               <p>* Reverse Charge Mechanism not applicable</p>
-             </div>
-           </div>
-         </div>
+        {/* ==================== TERMS & CONDITIONS ==================== */}
+        <div className="section-modern">
+          <div className="section-header-modern">TERMS AND CONDITIONS</div>
+          <div className="section-body-modern compact">
+            <div className="terms-text-modern">
+              <p>As per Agreement</p>
+              <p>* Reverse Charge Mechanism not applicable</p>
+            </div>
+          </div>
+        </div>
 
-       {/* ==================== FOOTER WITH LOGO AND TEXT ==================== */}
-         <div className="footer-section-modern">
+        {/* ==================== FOOTER WITH LOGO AND TEXT ==================== */}
+        <div className="footer-section-modern">
           <div className="footer-content">
-             <span className="footer-text-modern">INVOICE GENERATED ON </span>
-             <a href="https://www.hourly.design/" target="_blank" rel="noopener noreferrer" className="footer-logo-link">
-               <img src={LOGO_URL} alt="Hourly Design" />
-             </a>
-           </div>
-         </div>
+            <span className="footer-text-modern">INVOICE GENERATED ON </span>
+            <a href="https://www.hourly.design/" target="_blank" rel="noopener noreferrer" className="footer-logo-link">
+              <img src={LOGO_URL} alt="Hourly Design" />
+            </a>
+          </div>
+        </div>
       </div>
     </div>
   );

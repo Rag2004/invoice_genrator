@@ -65,6 +65,8 @@ const invoicesRouter = require('./routes/invoices');
 const draftsRouter = require('./routes/drafts');         // ✅ ADDED (if exists)
 const dashboardRouter = require('./routes/dashboard');
 const modesRouter = require('./routes/modes');
+const companyDetailsRouter = require('./routes/companyDetails');  // ✅ NEW
+const stateCodesRouter = require('./routes/stateCodes');          // ✅ NEW
 
 // ✅ Register routes in correct order (most specific first)
 app.use('/api/auth', authRouter);
@@ -74,6 +76,8 @@ app.use('/api/team', authMiddleware, teamRouter);          // ✅ ADDED
 app.use('/api/invoices', authMiddleware, invoicesRouter);
 app.use('/api/dashboard', authMiddleware, dashboardRouter);
 app.use('/api/modes', authMiddleware, modesRouter);
+app.use('/api/company-details', companyDetailsRouter);     // ✅ NEW - No auth needed (public data)
+app.use('/api/state-codes', stateCodesRouter);             // ✅ NEW - No auth needed (public data)
 
 // ✅ Drafts route (if you have a separate drafts router)
 try {
@@ -120,40 +124,40 @@ if (!isProduction || process.env.ADMIN_API_KEY) {
 // Test routes — disabled in production to avoid leaking API structure
 if (!isProduction) {
   app.get('/api/test-routes', (req, res) => {
-  res.json({
-    ok: true,
-    message: 'All routes are loaded!',
-    availableRoutes: {
-      auth: [
-        'POST /api/auth/start-login',
-        'POST /api/auth/verify-otp',
-        'GET  /api/auth/me',
-        'POST /api/auth/complete-profile',
-        'POST /api/auth/logout'
-      ],
-      projects: [
-        'GET  /api/projects/:code',
-        'GET  /api/projects/:code/setup'  // ✅ This is what was missing!
-      ],
-      clients: [
-        'GET  /api/clients/:code'
-      ],
-      team: [
-        'GET  /api/team'
-      ],
-      invoices: [
-        'POST /api/invoices/draft',
-        'POST /api/invoices/draft/:id',
-        'POST /api/invoices/finalize',
-        'POST /api/invoices/share',         // ✅ Secure email endpoint
-        'GET  /api/invoices',
-        'GET  /api/invoices/:id'
-      ],
-      dashboard: [
-        'GET  /api/dashboard/summary'
-      ]
-    }
-  });
+    res.json({
+      ok: true,
+      message: 'All routes are loaded!',
+      availableRoutes: {
+        auth: [
+          'POST /api/auth/start-login',
+          'POST /api/auth/verify-otp',
+          'GET  /api/auth/me',
+          'POST /api/auth/complete-profile',
+          'POST /api/auth/logout'
+        ],
+        projects: [
+          'GET  /api/projects/:code',
+          'GET  /api/projects/:code/setup'  // ✅ This is what was missing!
+        ],
+        clients: [
+          'GET  /api/clients/:code'
+        ],
+        team: [
+          'GET  /api/team'
+        ],
+        invoices: [
+          'POST /api/invoices/draft',
+          'POST /api/invoices/draft/:id',
+          'POST /api/invoices/finalize',
+          'POST /api/invoices/share',         // ✅ Secure email endpoint
+          'GET  /api/invoices',
+          'GET  /api/invoices/:id'
+        ],
+        dashboard: [
+          'GET  /api/dashboard/summary'
+        ]
+      }
+    });
   });
 }
 

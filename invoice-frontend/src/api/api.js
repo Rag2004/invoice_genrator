@@ -240,6 +240,45 @@ export async function getClient(clientCode) {
 }
 
 // ============================================================================
+// COMPANY DETAILS & STATE CODES APIs
+// ============================================================================
+
+export async function getCompanyDetails() {
+  return dedupedFetch(
+    CACHE_KEYS.COMPANY_DETAILS || 'company-details',
+    () => apiGet('/company-details', false),
+    CACHE_TTL.COMPANY_DETAILS || 3600000 // 1 hour cache
+  ).catch((err) => {
+    console.error('Error fetching company details:', err);
+    // Return default values as fallback
+    return {
+      ok: false,
+      companyDetails: {
+        company_name: 'Hourly Ventures LLP',
+        registered_office: 'K-47, Kailash Colony, South Delhi, New Delhi, Delhi, India, 110048',
+        state_code: 'Delhi (07)',
+        pan: 'AASFH5516N',
+        cin: 'ACQ-3618',
+        gstin: 'JKNJKNSX',
+        email: 'Team@Hourly.Design'
+      }
+    };
+  });
+}
+
+export async function getStateCodes(stateName = null) {
+  const url = stateName
+    ? `/state-codes?state=${encodeURIComponent(stateName)}`
+    : '/state-codes';
+
+  return apiGet(url, false).catch((err) => {
+    console.error('Error fetching state codes:', err);
+    return { ok: false, stateCodes: {} };
+  });
+}
+
+
+// ============================================================================
 // INVOICE APIs - ✅ FIXED WITH CONSULTANT ID
 // ============================================================================
 

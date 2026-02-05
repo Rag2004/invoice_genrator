@@ -8,7 +8,7 @@ import InvoiceComplete from './components/InvoiceComplete';
 import ShareInvoiceDialog from './components/ui/ShareInvoiceDialog';
 import InvoicePreviewModal from './components/InvoicePreviewModal';
 
-import { getTeam, getInvoiceSetup, shareInvoice, createDraft, updateDraft, finalizeInvoice, getInvoice, getModes, clearTeamCache } from './api/api';
+import { getTeam, getInvoiceSetup, shareInvoice, createDraft, updateDraft, finalizeInvoice, getInvoice, getModes, clearTeamCache, getCompanyDetails } from './api/api';
 import { useAuth } from './context/AuthContext';
 import { LOGO_URL } from "./config/branding";
 
@@ -83,7 +83,14 @@ const recalc = (draft) => {
   });
 
   const subtotal = items.reduce((sum, item) => sum + item.amount, 0);
-  const gst = Math.round(subtotal * 0.18);
+
+  // ✅ FIX: Normalize GST rate - convert percentage to decimal if needed
+  let gstRate = Number(draft.gstRate ?? 0.18);
+  if (gstRate > 1) {
+    gstRate = gstRate / 100; // Convert 20 → 0.20, 18 → 0.18
+  }
+
+  const gst = Math.round(subtotal * gstRate);
   const total = subtotal + gst;
   const serviceFeePct = Number(draft.serviceFeePct || 0);
   const serviceFeeAmount = Math.round(total * (serviceFeePct / 100));
@@ -93,6 +100,7 @@ const recalc = (draft) => {
     ...draft,
     items,
     subtotal,
+    gstRate,
     gst,
     total,
     serviceFeePct,
@@ -150,6 +158,7 @@ export default function Invoice() {
   const [projectData, setProjectData] = useState(null);
   const [clientData, setClientData] = useState(null);
   const [consultantData, setConsultantData] = useState(null);
+  const [companyDetails, setCompanyDetails] = useState(null);
   const [loadingProject, setLoadingProject] = useState(false);
   const [loadingDraft, setLoadingDraft] = useState(false);
   const [modesOptions, setModesOptions] = useState([]);
@@ -175,6 +184,7 @@ export default function Invoice() {
     items: [],
     notes: "",
     subtotal: 0,
+    gstRate: 0.18,
     gst: 0,
     total: 0,
     serviceFeePct: 25,
@@ -247,6 +257,24 @@ export default function Invoice() {
   }, []);
 
   /* ============================================================================
+     LOAD COMPANY DETAILS
+  ============================================================================ */
+
+  useEffect(() => {
+    getCompanyDetails()
+      .then((res) => {
+        if (res?.ok && res.companyDetails) {
+          setCompanyDetails(res.companyDetails);
+        } else if (res?.companyDetails) {
+          setCompanyDetails(res.companyDetails);
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to load company details:', err);
+      });
+  }, []);
+
+  /* ============================================================================
      ✅ LOAD EXISTING DRAFT - PRODUCTION FIXED
   ============================================================================ */
 
@@ -299,6 +327,11 @@ export default function Invoice() {
 
           baseHourlyRate: draft.config?.baseHourlyRate || draft.baseHourlyRate || 0,
           serviceFeePct: draft.config?.serviceFeePct || draft.serviceFeePct || 25,
+          gstRate: (() => {
+            // ✅ FIX: Normalize GST from draft
+            let gst = draft.config?.gstRate ?? draft.gstRate ?? 0.18;
+            return gst > 1 ? gst / 100 : gst;
+          })(),
         };
 
         // Calculate ALL derived values
@@ -423,6 +456,13 @@ export default function Invoice() {
           billingAddress: res.client?.billingAddress || "",
           baseHourlyRate: res.project.hourlyRate,
           serviceFeePct: incomingServiceFeeToPercent(res.project.serviceFeePct),
+          gstRate: (() => {
+            // ✅ FIX: Normalize GST - convert percentage to decimal if needed
+            // Use undefined coalescing (??) instead of logical OR (||) to treat 0 as valid
+            let rawGst = res.project?.gst ?? res.project?.GST ?? 0.18;
+            let gst = Number(rawGst);
+            return gst > 1 ? gst / 100 : gst;
+          })(),
           stages: prev.stages?.length > 0 ? prev.stages : (res.project?.stages || []),
         }));
       })
@@ -518,7 +558,8 @@ export default function Invoice() {
           // ✅ NEW: Nest config values
           config: {
             baseHourlyRate: invoice.baseHourlyRate,
-            serviceFeePct: invoice.serviceFeePct
+            serviceFeePct: invoice.serviceFeePct,
+            gstRate: invoice.gstRate  // ✅ NEW: Save GST rate
           }
         }
       };
@@ -646,7 +687,8 @@ export default function Invoice() {
 
             config: {
               baseHourlyRate: invoice.baseHourlyRate,
-              serviceFeePct: invoice.serviceFeePct
+              serviceFeePct: invoice.serviceFeePct,
+              gstRate: invoice.gstRate  // ✅ NEW: Save GST rate
             }
           }
         };
@@ -711,13 +753,13 @@ export default function Invoice() {
         },
 
         serviceProvider: {
-          name: "Hourly Ventures LLP",
-          registeredOffice: "K-47, Kailash Colony, South Delhi, New Delhi, Delhi, India, 110048",
-          stateCode: "Delhi (07)",
-          pan: "AASFH5516N",
-          cin: "ACQ-3618",
-          gstin: "JKNJKNSX",
-          email: "Team@Hourly.Design"
+          name: companyDetails?.company_name || "Hourly Ventures LLP",
+          registeredOffice: companyDetails?.registered_office || "K-47, Kailash Colony, South Delhi, New Delhi, Delhi, India, 110048",
+          stateCode: companyDetails?.state_code || "Delhi (07)",
+          pan: companyDetails?.pan || "AASFH5516N",
+          cin: companyDetails?.cin || "ACQ-3618",
+          gstin: companyDetails?.gstin || "JKNJKNSX",
+          email: companyDetails?.email || "Team@Hourly.Design"
         },
 
         work: {
@@ -1072,7 +1114,7 @@ export default function Invoice() {
 
             <div className="rigid-data-box">
               <div className="rigid-label">GST % (Fixed)</div>
-              <div className="rigid-value">18%</div>
+              <div className="rigid-value">{Math.round((invoice.gstRate ?? 0.18) * 100)}%</div>
             </div>
           </div>
         </div>
@@ -1242,13 +1284,14 @@ export default function Invoice() {
               },
 
               serviceProvider: {
-                name: "Hourly Ventures LLP",
-                registeredOffice: "K-47, Kailash Colony, South Delhi, New Delhi, Delhi, India, 110048",
-                stateCode: "Delhi (07)",
-                pan: "AASFH5516N",
-                cin: "ACQ-3618",
-                gstin: "JKNJKNSX",
-                email: "Team@Hourly.Design"
+                name: companyDetails?.company_name || "Hourly Ventures LLP",
+                companyName: companyDetails?.company_name || "Hourly Ventures LLP", // ✅ Added for InvoiceComplete
+                registeredOffice: companyDetails?.registered_office || "K-47, Kailash Colony, South Delhi, New Delhi, Delhi, India, 110048",
+                stateCode: companyDetails?.state_code || "Delhi (07)",
+                pan: companyDetails?.pan || "AASFH5516N",
+                cin: companyDetails?.cin || "ACQ-3618",
+                gstin: companyDetails?.gstin || "JKNJKNSX",
+                email: companyDetails?.email || "Team@Hourly.Design"
               },
 
               work: {
@@ -1304,6 +1347,7 @@ export default function Invoice() {
         projectData={projectData || {}}
         clientData={clientData || {}}
         consultantData={consultantData || {}}
+        companyDetails={companyDetails || {}} // ✅ Pass company details
         logoUrl={LOGO_URL}
       />
 

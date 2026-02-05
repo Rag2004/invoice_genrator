@@ -22,6 +22,7 @@ export default function InvoicePreviewModal({
   projectData = {},
   clientData = {},
   consultantData = {},
+  companyDetails = {}, // ✅ Accept company details
   logoUrl = ""
 }) {
   const modalRef = useRef(null);
@@ -58,7 +59,7 @@ export default function InvoicePreviewModal({
   // BUILD OR USE EXISTING SNAPSHOT
   // ============================================================================
   let snapshot;
-  
+
   if (invoice.status === 'FINAL' && invoice.snapshot) {
     // ✅ For FINAL invoices, use the hydrated snapshot directly
     snapshot = invoice.snapshot;
@@ -68,7 +69,8 @@ export default function InvoicePreviewModal({
       invoice,
       projectData,
       clientData,
-      consultantData
+      consultantData,
+      companyDetails // ✅ Pass to builder
     );
   }
 

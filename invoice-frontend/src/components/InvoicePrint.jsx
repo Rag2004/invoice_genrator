@@ -54,13 +54,18 @@ export default function InvoiceComplete({
     businessStateCode: consultantData?.businessStateCode || consultantData?.business_state_code || "",
   };
 
+  /* 
+   * ✅ DYNAMIC COMPANY DETAILS 
+   * (Falls back to defaults ONLY if not provided in props)
+   */
   const serviceProvider = {
-    registeredOffice: "K-47, Kailash Colony, South Delhi, New Delhi, Delhi, India, 110048",
-    stateCode: "Delhi (07)",
-    email: "Team@Hourly.Design",
-    pan: "AASFH5516N",
-    cin: "ACQ-3618",
-    gstin: "",
+    registeredOffice: consultantData?.companyDetails?.registered_office || "Not provided",
+    stateCode: consultantData?.companyDetails?.state_code || "Not provided",
+    email: consultantData?.companyDetails?.email || "Team@Hourly.Design",
+    pan: consultantData?.companyDetails?.pan || "Not provided",
+    cin: consultantData?.companyDetails?.cin || "Not provided",
+    gstin: consultantData?.companyDetails?.gstin || "",
+    companyName: consultantData?.companyDetails?.company_name || "Hourly Ventures LLP" // Default fallback
   };
 
   const customer = {
@@ -530,7 +535,7 @@ export default function InvoiceComplete({
         <div className="invoice-body">
           {/* Hourly Ventures LLP */}
           <div className="section-box">
-            <div className="section-header">Hourly Ventures LLP</div>
+            <div className="section-header">{serviceProvider.companyName}</div>
             <div className="section-content">
               <div className="row-grid">
                 <div className="field-group">
@@ -710,9 +715,9 @@ export default function InvoiceComplete({
                       <tr key={idx}>
                         <td className="strong">{stage?.stage || `Stage ${idx + 1}`}</td>
                         <td>
-                          {stage?.description || 
-                           (stage?.subStages || []).map(x => x?.label || x?.name).filter(Boolean).join(", ") || 
-                           '—'}
+                          {stage?.description ||
+                            (stage?.subStages || []).map(x => x?.label || x?.name).filter(Boolean).join(", ") ||
+                            '—'}
                         </td>
                         <td className="center strong">
                           {stage?.days ? Number(stage.days).toLocaleString('en-IN') : '—'}
@@ -749,7 +754,7 @@ export default function InvoiceComplete({
                         <th className="center" style={{ width: '10%' }}>Mode</th>
                         {stages.map((_, idx) => (
                           <th key={idx} className="right">
-                            Hours<br/>Stage {idx + 1}
+                            Hours<br />Stage {idx + 1}
                           </th>
                         ))}
                         <th className="right" style={{ width: '12%' }}>Rate</th>
@@ -832,7 +837,7 @@ export default function InvoiceComplete({
           </div>
           <div className="signature-card">
             <div className="signature-label">Authorized Signature</div>
-            <div className="signature-line">Hourly Ventures LLP</div>
+            <div className="signature-line">{serviceProvider.companyName}</div>
           </div>
         </div>
 

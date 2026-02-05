@@ -168,6 +168,10 @@ async function getInvoiceSetup(code) {
   return post('getInvoiceSetup', { code });
 }
 
+async function getCompanyDetails() {
+  return get('getCompanyDetails', {});
+}
+
 // ============================================================================
 // AUTH APIs
 // ============================================================================
@@ -429,6 +433,7 @@ module.exports = {
   getClient,
   getTeam,
   getInvoiceSetup,
+  getCompanyDetails,
 
   // Auth
   startLogin,

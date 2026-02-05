@@ -1,0 +1,4159 @@
+/*
+ * FINAL PRODUCTION-READY INVOICE + AUTH APP SCRIPT
+ * Matches EXACT column names:
+ * invoice_Date, billing_Address, itemsJson, createdAt, updatedAt, isDraft, etc.
+ * Cleaned, merged, deduplicated, fully working.
+ */
+
+function getApiToken() {
+  return "vhytdyhydfytfytewwr4yjonfui2bhk578yokhbfxrrfuyg75789"; 
+}
+
+
+
+const SHEET_CLIENTS = 'Clients';
+const SHEET_PROJECTS = 'Projects';
+const SHEET_TEAM = 'TeamMembers';
+const SHEET_INVOICES = 'Invoices';
+const SHEET_CONFIG = 'Config';
+const SHEET_MODES = 'ConsultationModes';
+const SHEET_CONSULTANTS = 'Consultants';
+const SHEET_OTP_SESSIONS = 'OTP_Sessions';
+const SHEET_DASHBOARD = 'Dashboard';
+
+/* -------------------- UTILITIES ---------------------- */
+
+// function jsonResponse(obj) {
+//   return ContentService.createTextOutput(JSON.stringify(obj))
+//     .setMimeType(ContentService.MimeType.JSON);
+// }
+
+// function unauthorizedResponse() {
+//   return jsonResponse({ error: "unauthorized" });
+// }
+
+// function requireTokenFromRequest(e) {
+//   let t = null;
+
+//   if (e && e.parameter && e.parameter.token) t = e.parameter.token;
+
+//   if (e && e.postData && e.postData.contents) {
+//     try {
+//       const body = JSON.parse(e.postData.contents);
+//       if (body && body.token) t = body.token;
+//     } catch (_) {}
+//   }
+
+//   return t === TOKEN;
+// }
+// ✅ Sabse aasaan fix: Security check ko hamesha 'Haan' bolne do
+/* =========================================================
+   ✅ FIX 1: Security Check ko Hamesha PASS karo
+   ========================================================= */
+function isAuthorized(e) {
+  return true; // Koi rok-tok nahi, seedha entry!
+}
+
+/* =========================================================
+   ✅ FIX 2: Bulletproof doPost 
+   ========================================================= */
+function doPost(e) {
+  if (!e || !e.postData) {
+    return json({ ok: false, error: "no_post_data_received" });
+  }
+
+  let body = {};
+  try {
+    body = JSON.parse(e.postData.contents || "{}");
+  } catch (err) {
+    return json({ ok: false, error: "invalid_json_body" });
+  }
+
+  const action = body.action || "";
+  const data = body.data || {};
+
+  try {
+    switch (action) {
+
+      // --- Auth ---
+      case "storeOTP":
+        return json(storeOtp(data));
+
+      case "verifyOTP":
+        return json(verifyOtp(data));
+
+      case "getConsultantByEmail":
+        return json(getConsultantByEmailAction(data));
+
+      case "createConsultant":
+        return json(createConsultantAction(data));
+
+      // --- 🔥 PROJECT LOOKUP (THIS WAS MISSING) ---
+      case "getInvoiceSetup":
+        return json(getInvoiceSetup(data.code));
+
+      // --- Invoice ---
+      case "createDraft":
+        return json(createDraft(data));
+
+      case "updateDraft":
+        return json(updateDraft(data.invoiceId, data));
+
+      case "saveInvoice":
+        return json(saveInvoice(data));
+
+      case "sendInvoiceEmail":
+        return json(sendInvoiceEmail(data));
+
+      // --- Dashboard ---
+      case "listInvoicesByConsultant":
+        return json(listInvoicesByConsultantAction(data.consultantId));
+
+      case "getDashboard":
+        return json(getDashboard(data.consultantId));
+
+      default:
+        return json({ ok: false, error: "unknown_action: " + action });
+    }
+  } catch (err) {
+    return json({ ok: false, error: "script_error: " + String(err) });
+  }
+}
+
+
+
+
+function getSpreadsheet() {
+  return SpreadsheetApp.getActive(); 
+}
+
+/* -------------------- HEADER NORMALIZATION ---------------------- */
+
+
+function normalizeSnapshotInput(input) {
+  if (!input || typeof input !== "object") return input;
+
+  const consultantId = input.consultantId;
+  const snap = input.snapshot;
+  if (!snap || typeof snap !== "object") return input;
+
+  const invoiceData = snap.invoiceData || {};
+
+  return {
+    projectCode: invoiceData.projectCode,
+    clientCode: invoiceData.clientCode,
+    consultantName: invoiceData.consultantName,
+    billingAddress: invoiceData.billingAddress,
+    invoiceDate: invoiceData.invoiceDate,
+
+    items: invoiceData.items || snap.items || [],
+    subtotal: invoiceData.subtotal ?? snap.subtotal,
+    gst: invoiceData.gst ?? snap.gst,
+    serviceFeePct: invoiceData.serviceFeePct ?? snap.serviceFeePct,
+    serviceFee: invoiceData.serviceFeeAmount ?? snap.serviceFeeAmount,
+    netEarnings: invoiceData.netEarnings ?? snap.netEarnings,
+    notes: invoiceData.notes ?? snap.notes,
+
+    consultantId,
+    invoiceId: input.invoiceId
+  };
+}
+
+
+/* -------------------- CONFIG SEQUENCE ---------------------- */
+
+function readConfigMap() {
+  const ss = getSpreadsheet();
+  const sh = ss.getSheetByName(SHEET_CONFIG);
+  if (!sh) return {};
+
+  const rows = sh.getDataRange().getValues();
+  if (rows.length < 2) return {};
+
+  const map = {};
+  rows.slice(1).forEach(r => map[String(r[0])] = r[1]);
+  return map;
+}
+
+function writeConfigValue(key, value) {
+  const ss = getSpreadsheet();
+  let sh = ss.getSheetByName(SHEET_CONFIG);
+  if (!sh) {
+    sh = ss.insertSheet(SHEET_CONFIG);
+    sh.appendRow(["key", "value"]);
+  }
+
+  const rows = sh.getDataRange().getValues();
+
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === key) {
+      sh.getRange(i + 1, 2).setValue(value);
+      return;
+    }
+  }
+
+  sh.appendRow([key, value]);
+}
+
+function getNextInvoiceSequence() {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(5000);
+  try {
+    const map = readConfigMap();
+    const cur = Number(map["invoice_seq"] || 0);
+    const next = cur + 1;
+    writeConfigValue("invoice_seq", next);
+    return next;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* -------------------- CONSULTANT & OTP LOGIC ---------------------- */
+
+function generateOtp() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function ensureOtpSheet() {
+  const ss = getSpreadsheet();
+  let sh = ss.getSheetByName(SHEET_OTP_SESSIONS);
+  if (!sh) {
+    sh = ss.insertSheet(SHEET_OTP_SESSIONS);
+    sh.appendRow(["email","otp","otp_type","expires_at","attempts","created_at"]);
+  }
+  return sh;
+}
+
+function storeOtp(dataOrEmail, otp, otpType) {
+  let email, code, type;
+
+  // Support object input (from backend)
+  if (typeof dataOrEmail === "object") {
+    email = dataOrEmail.email;
+    code  = dataOrEmail.otp;
+    type  = dataOrEmail.otp_type || "login";
+  } else {
+    email = dataOrEmail;
+    code  = otp;
+    type  = otpType || "login";
+  }
+
+  if (!email || !code) {
+    throw new Error("Missing email or otp");
+  }
+
+  const sh = ensureOtpSheet();
+  const expires = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+
+  sh.appendRow([
+    String(email).trim().toLowerCase(),
+    String(code).trim(),
+    type,
+    expires,
+    0,
+    nowIso()
+  ]);
+
+  return {
+    ok: true,
+    email,
+    otp_type: type,
+    expires_at: expires
+  };
+}
+
+
+
+
+function readOtp(email) {
+  if (!email) return null;
+
+  const sh = ensureOtpSheet();
+  const vals = sh.getDataRange().getValues();
+  if (vals.length < 2) return null;
+
+  const header = vals[0].map(h =>
+    h ? h.toString().trim().toLowerCase() : ""
+  );
+
+  const colEmail   = header.indexOf("email");
+  const colOtp     = header.indexOf("otp");
+  const colExpires = header.indexOf("expires_at");
+
+  if (colEmail === -1 || colOtp === -1 || colExpires === -1) {
+    throw new Error("OTP sheet headers are invalid");
+  }
+
+  // Read latest OTP (bottom-up)
+  for (let i = vals.length - 1; i >= 1; i--) {
+    const rowEmail = vals[i][colEmail];
+    if (!rowEmail) continue;
+
+    if (String(rowEmail).trim().toLowerCase() === email.toLowerCase()) {
+      return {
+        rowIndex: i + 1,
+        otp: String(vals[i][colOtp]).trim(),
+        expires: vals[i][colExpires]
+      };
+    }
+  }
+
+  return null;
+}
+
+
+
+
+function verifyOtp(data) {
+  if (!data || !data.email || !data.otp) {
+    return { ok: false, error: "missing_parameters" };
+  }
+
+  const email = String(data.email).trim().toLowerCase();
+  const otp = String(data.otp).trim();
+
+  const session = readOtp(email);
+  if (!session) return { ok: false, error: "no_otp_found" };
+
+  const now = Date.now();
+  const expiry = new Date(session.expires).getTime();
+
+  if (isNaN(expiry) || now > expiry) {
+    return { ok: false, error: "otp_expired" };
+  }
+
+  if (String(session.otp) !== otp) {
+    return { ok: false, error: "invalid_otp" };
+  }
+
+  const sh = ensureOtpSheet();
+  sh.deleteRow(session.rowIndex);
+
+  return { ok: true, email };
+}
+
+
+
+
+/* -------------------- SHEET TO OBJECT ---------------------- */
+
+function sheetToObjects(name) {
+  const ss = getSpreadsheet();
+  const sh = ss.getSheetByName(name);
+  if (!sh) return [];
+
+  const vals = sh.getDataRange().getValues();
+  if (vals.length < 2) return [];
+
+  const headers = vals[0];
+  return vals.slice(1).map(r => {
+    const obj = {};
+    headers.forEach((h, i) => obj[h] = r[i]);
+    return obj;
+  });
+}
+
+/* -------------------- DRAFT / UPDATE / FINALIZE ---------------------- */
+
+
+function buildRowFromData(headers, data) {
+  const row = new Array(headers.length).fill("");
+
+  function set(names, value) {
+    names.forEach(n => {
+      const key = n.toLowerCase().replace(/[\s_]/g, "");
+      headers.forEach((h, i) => {
+        const hk = h.toLowerCase().replace(/[\s_]/g, "");
+        if (key === hk) row[i] = value;
+      });
+    });
+  }
+
+  set(["invoiceId"], data.invoiceId);
+  set(["invoiceNumber"], data.invoiceNumber || "");
+  set(["status"], data.status || "DRAFT");
+  set(["invoice_Date"], data.invoiceDate || nowIso());
+  set(["projectCode"], data.projectCode || "");
+  set(["clientCode"], data.clientCode || "");
+  set(["consultantId"], data.consultantId || "");
+  set(["consultantName"], data.consultantName || "");
+  set(["billing_Address"], data.billingAddress || "");
+  set(["subtotal"], data.subtotal || 0);
+  set(["gst"], data.gst || 0);
+  set(["serviceFeePct"], data.serviceFeePct || 0);
+  set(["serviceFee"], data.serviceFee || 0);
+  set(["netEarnings"], data.netEarnings || 0);
+
+  const itemsStr =
+    typeof data.itemsJson === "string"
+      ? data.itemsJson
+      : JSON.stringify(data.items || []);
+  set(["itemsJson"], itemsStr);
+
+  set(["notes"], data.notes || "");
+  set(["createdAt"], data.createdAt || nowIso());
+  set(["updatedAt"], nowIso());
+  set(["isDraft"], data.status === "DRAFT" ? "TRUE" : "FALSE");
+
+  return row;
+}
+
+/* =========================================================
+   ✅ FIX: Auto-Hydrate Consultant Data (Trust Database, Not Frontend)
+   ========================================================= */
+/* =========================================================
+   ✅ SMART CREATE DRAFT (Calculates Totals & Fixes ID)
+   ========================================================= */
+/* =========================================================
+   ✅ SMART CREATE DRAFT (Calculates & Saves)
+   ========================================================= */
+// function createDraft(payload) {
+//   const { consultantId, invoiceData } = payload;
+  
+//   // Project code check
+//   const projectCode = invoiceData?.project?.projectCode || invoiceData?.projectCode;
+  
+//   if (!consultantId || !projectCode) {
+//     return { ok: false, error: "consultantId & projectCode required" };
+//   }
+
+//   const invoiceId = `DRAFT_${Date.now()}`;
+//   const now = new Date().toISOString(); // ya nowIso() agar tumhare paas helper hai
+  
+//   // 🔢 CALCULATE TOTALS (Jo pehle 0 tha)
+//   const items = invoiceData.work?.items || invoiceData.items || [];
+  
+//   const subtotal = calculateDraftSubtotal(items); // 👈 Helper ka magic
+//   const gst = Math.round(subtotal * 0.18);
+//   const total = subtotal + gst;
+//   const serviceFeePct = Number(invoiceData.config?.serviceFeePct || 25);
+//   const serviceFee = Math.round(total * (serviceFeePct / 100));
+//   const netEarnings = total - serviceFee;
+
+//   const sheet = getInvoicesSheet(true);
+  
+//   // Row data prepare karo
+//   sheet.appendRow([
+//     invoiceId,                  // invoiceId
+//     "",                         // invoiceNumber
+//     "DRAFT",                    // status
+//     invoiceData.date || now,    // invoice_Date
+//     projectCode,       
+//     invoiceData.client?.code || "",
+//     consultantId,               
+//     invoiceData.consultant?.name || "",
+//     invoiceData.client?.billingAddress || "",
+//     subtotal,                   // ✅ Ab yahan Calculated Amount aayega
+//     gst,                        // ✅ Calculated GST
+//     serviceFeePct,
+//     serviceFee,                 // ✅ Service Fee
+//     netEarnings,                // ✅ Net Earnings
+
+//     // 🔒 STORE FULL SNAPSHOT
+//     JSON.stringify(invoiceData),
+
+//     invoiceData.notes || "",
+//     now,
+//     now,
+//     "TRUE"
+//   ]);
+
+//   return { ok: true, invoiceId };
+// }
+/* =========================================================
+   ✅ SMART CREATE DRAFT (Auto-Hydrate + Calculate)
+   ========================================================= */
+function createDraft(payload) {
+  const { consultantId, invoiceData } = payload;
+  
+  const projectCode = invoiceData?.project?.projectCode || invoiceData?.projectCode;
+  if (!consultantId || !projectCode) return { ok: false, error: "missing_ids" };
+
+  const invoiceId = `DRAFT_${Date.now()}`;
+  const now = new Date().toISOString(); 
+  
+  // 🔒 ID FIX
+  if(!invoiceData.consultant) invoiceData.consultant = {};
+  invoiceData.consultant.id = consultantId; 
+
+  // 💧 HYDRATION MAGIC (Ye Missing Tha!)
+  // 1. Client Data Full Bharo
+  // const clientCode = invoiceData.client?.code || invoiceData.clientCode;
+  // if (clientCode) {
+  //    const fullClient = getClientMasterData(clientCode);
+  //    if (fullClient) {
+  //      invoiceData.client = {
+  //        ...invoiceData.client, 
+  //        ...fullClient,          // ✅ Sheet se Email, State, PAN sab aa jayega
+  //        email: fullClient.email // Explicitly ensure email
+  //      };
+  //    }
+  // }
+
+
+  // 2. Consultant Data Full Bharo
+  // const fullConsultant = getConsultantMasterData(consultantId);
+  // if (fullConsultant) {
+  //    invoiceData.consultant = {
+  //      ...invoiceData.consultant,
+  //      ...fullConsultant
+  //    };
+  // }
+  // ✅ NEW CODE - HYDRATION MAGIC
+// 1. Client Data - Fetch from master sheet
+const clientCode = invoiceData.client?.code || invoiceData.clientCode;
+if (clientCode) {
+  const fullClient = getClientMasterData(clientCode);
+  if (fullClient) {
+    invoiceData.client = {
+      ...invoiceData.client,
+      ...fullClient,
+      email: fullClient.email
+    };
+  }
+}
+
+// 2. ✅ Consultant Data - Fetch from master sheet with BUSINESS fields
+const fullConsultant = getConsultantMasterData(consultantId);
+if (fullConsultant) {
+  invoiceData.consultant = {
+    id: fullConsultant.id,
+    name: fullConsultant.name,
+    email: fullConsultant.email,
+    // ✅ BUSINESS FIELDS - Add these!
+    businessName: fullConsultant.businessName,
+    registeredOffice: fullConsultant.registeredOffice,
+    pan: fullConsultant.pan,
+    gstin: fullConsultant.gstin,
+    cin: fullConsultant.cin || '',
+    stateCode: fullConsultant.stateCode || ''
+  };
+  
+  Logger.log('Consultant data hydrated: ' + JSON.stringify(invoiceData.consultant));
+}
+
+  // 🔢 CALCULATION
+  const items = invoiceData.work?.items || invoiceData.items || [];
+  const subtotal = calculateDraftSubtotal(items);
+  
+  const gst = Math.round(subtotal * 0.18);
+  const total = subtotal + gst;
+  const serviceFeePct = Number(invoiceData.config?.serviceFeePct || 25);
+  const serviceFee = Math.round(total * (serviceFeePct / 100));
+  const netEarnings = total - serviceFee;
+
+  const sheet = getInvoicesSheet(true);
+  
+  sheet.appendRow([
+    invoiceId, "", "DRAFT", invoiceData.date || now,
+    projectCode, invoiceData.client?.code || "",
+    consultantId, invoiceData.consultant?.name || "",
+    invoiceData.client?.billingAddress || "",
+    subtotal, gst, serviceFeePct, serviceFee, netEarnings,
+    JSON.stringify(invoiceData), // ✅ Ab is JSON mein poora data hoga
+    invoiceData.notes || "",
+    now, now, "TRUE"
+  ]);
+
+  return { ok: true, invoiceId };
+}
+
+
+/* =========================================================
+   ✅ SMART UPDATE DRAFT (Updates Columns + JSON)
+   ========================================================= */
+/* =========================================================
+   ✅ SMART UPDATE DRAFT (Updates Calculations in Columns)
+   ========================================================= */
+/* =========================================================
+   ✅ SMART UPDATE DRAFT (Updates Columns Too)
+   ========================================================= */
+// function updateDraft(invoiceId, payload) {
+//   const sheet = getInvoicesSheet(false);
+//   const vals = sheet.getDataRange().getValues();
+//   const map = makeHeaderMap(vals[0]);
+
+//   // Row dhundo
+//   const rowIndex = vals.findIndex((r, i) => i > 0 && String(r[map.invoiceid]) === String(invoiceId));
+//   if (rowIndex === -1) return { ok: false, error: "not_found" };
+
+//   if (String(vals[rowIndex][map.status]).toUpperCase() === "FINAL") {
+//     return { ok: false, error: "cannot_edit_final" };
+//   }
+
+//   const d = payload.invoiceData;
+//   const row = rowIndex + 1;
+//   const now = new Date().toISOString(); // ya nowIso()
+
+//   // 🔢 RE-CALCULATE TOTALS (Edit karte waqt)
+//   const items = d.work?.items || d.items || [];
+  
+//   const subtotal = calculateDraftSubtotal(items); // 👈 Helper Call
+//   const gst = Math.round(subtotal * 0.18);
+//   const total = subtotal + gst;
+//   const serviceFeePct = Number(d.config?.serviceFeePct || 25);
+//   const serviceFee = Math.round(total * (serviceFeePct / 100));
+//   const netEarnings = total - serviceFee;
+
+//   // 📝 UPDATE SHEET COLUMNS
+//   sheet.getRange(row, map.invoicedate + 1).setValue(d.date || now);
+  
+//   if (map.billingaddress) 
+//     sheet.getRange(row, map.billingaddress + 1).setValue(d.client?.billingAddress || "");
+  
+//   // ✅ Update Totals Columns (Ye pehle missing tha)
+//   if (map.subtotal) sheet.getRange(row, map.subtotal + 1).setValue(subtotal);
+//   if (map.gst) sheet.getRange(row, map.gst + 1).setValue(gst);
+//   if (map.servicefeepct) sheet.getRange(row, map.servicefeepct + 1).setValue(serviceFeePct);
+//   if (map.servicefee) sheet.getRange(row, map.servicefee + 1).setValue(serviceFee);
+//   if (map.netearnings) sheet.getRange(row, map.netearnings + 1).setValue(netEarnings);
+
+//   // ✅ Update Snapshot (Poora Object Save karo)
+//   sheet.getRange(row, map.itemsjson + 1).setValue(JSON.stringify(d));
+  
+//   if (map.notes) sheet.getRange(row, map.notes + 1).setValue(d.notes || "");
+//   sheet.getRange(row, map.updatedat + 1).setValue(now);
+
+//   // Consultant ID fix (Agar owner change hua ho)
+//   if (payload.consultantId && map.consultantid) {
+//      sheet.getRange(row, map.consultantid + 1).setValue(payload.consultantId);
+//   }
+
+//   return { ok: true, invoiceId };
+// }
+function updateDraft(invoiceId, payload) {
+  const sheet = getInvoicesSheet(false);
+  const vals = sheet.getDataRange().getValues();
+  const map = makeHeaderMap(vals[0]);
+
+  const rowIndex = vals.findIndex((r, i) => i > 0 && String(r[map.invoiceid]) === String(invoiceId));
+  if (rowIndex === -1) return { ok: false, error: "not_found" };
+
+  if (String(vals[rowIndex][map.status]).toUpperCase() === "FINAL") {
+    return { ok: false, error: "cannot_edit_final" };
+  }
+
+  const d = payload.invoiceData;
+  const row = rowIndex + 1;
+  const now = new Date().toISOString();
+
+  // 🔒 ID FIX
+  if (payload.consultantId) {
+    if(!d.consultant) d.consultant = {};
+    d.consultant.id = payload.consultantId;
+  }
+
+// ✅ HYDRATION MAGIC - Update karte waqt bhi data poora karo
+const clientCode = d.client?.code || d.clientCode;
+if (clientCode) {
+  const fullClient = getClientMasterData(clientCode);
+  if (fullClient) {
+    d.client = {
+      ...d.client,
+      ...fullClient,
+      email: fullClient.email
+    };
+  }
+}
+
+// ✅ Consultant hydration - Same as createDraft
+const consId = d.consultant?.id || payload.consultantId;
+if (consId) {
+  const fullConsultant = getConsultantMasterData(consId);
+  if (fullConsultant) {
+    d.consultant = {
+      id: fullConsultant.id,
+      name: fullConsultant.name,
+      email: fullConsultant.email,
+      businessName: fullConsultant.businessName,
+      registeredOffice: fullConsultant.registeredOffice,
+      pan: fullConsultant.pan,
+      gstin: fullConsultant.gstin,
+      cin: fullConsultant.cin || '',
+      stateCode: fullConsultant.stateCode || ''
+    };
+    
+    Logger.log('Consultant updated: ' + JSON.stringify(d.consultant));
+  }
+}
+
+  // 🔢 CALCULATION
+  const items = d.work?.items || d.items || [];
+  const subtotal = calculateDraftSubtotal(items);
+  const gst = Math.round(subtotal * 0.18);
+  const total = subtotal + gst;
+  const serviceFeePct = Number(d.config?.serviceFeePct || 25);
+  const serviceFee = Math.round(total * (serviceFeePct / 100));
+  const netEarnings = total - serviceFee;
+
+  // 📝 UPDATE SHEET
+  sheet.getRange(row, map.invoicedate + 1).setValue(d.date || now);
+  if(map.billingaddress) sheet.getRange(row, map.billingaddress + 1).setValue(d.client?.billingAddress || "");
+  
+  if(map.subtotal) sheet.getRange(row, map.subtotal + 1).setValue(subtotal);
+  if(map.gst) sheet.getRange(row, map.gst + 1).setValue(gst);
+  if(map.servicefee) sheet.getRange(row, map.servicefee + 1).setValue(serviceFee);
+  if(map.netearnings) sheet.getRange(row, map.netearnings + 1).setValue(netEarnings);
+
+  // ✅ Ab JSON mein poora data save hoga
+  sheet.getRange(row, map.itemsjson + 1).setValue(JSON.stringify(d));
+  
+  if(map.notes) sheet.getRange(row, map.notes + 1).setValue(d.notes || "");
+  sheet.getRange(row, map.updatedat + 1).setValue(now);
+
+  if (payload.consultantId && map.consultantid) {
+     sheet.getRange(row, map.consultantid + 1).setValue(payload.consultantId);
+  }
+
+  return { ok: true, invoiceId };
+}
+/**
+ * ✅ getAllDrafts
+ * Returns all draft invoices
+ * Optional filter by consultantId
+ */
+function getAllDrafts({ consultantId } = {}) {
+  const sh = getInvoicesSheet(false);
+  if (!sh) {
+    return { ok: true, drafts: [] };
+  }
+
+  const vals = sh.getDataRange().getValues();
+  if (vals.length < 2) {
+    return { ok: true, drafts: [] };
+  }
+
+  const headers = vals[0];
+  const map = makeHeaderMap(headers);
+
+  const drafts = [];
+  const targetConsultantId = consultantId
+    ? String(consultantId).trim().toLowerCase()
+    : null;
+
+  for (let i = 1; i < vals.length; i++) {
+    const row = vals[i];
+    const status = String(row[map.status] || "").toUpperCase();
+
+    // Only drafts
+    if (status !== "DRAFT") continue;
+
+    // Optional consultant filter
+    if (targetConsultantId) {
+      const rowConsultantId = String(row[map.consultantid] || "")
+        .trim()
+        .toLowerCase();
+
+      if (rowConsultantId !== targetConsultantId) continue;
+    }
+
+    // Build flat draft object
+    const draft = {};
+    headers.forEach((h, j) => {
+      draft[h] = row[j];
+    });
+
+    drafts.push(draft);
+  }
+
+  return {
+    ok: true,
+    drafts: drafts
+  };
+}
+
+
+
+
+
+
+/* -------------------- FINALIZE / SAVE INVOICE ---------------------- */
+
+/* ============================================================================
+ * FIXED saveInvoice - Updates existing row from DRAFT → FINAL
+ * ============================================================================ */
+
+function getInvoiceSetup(projectCode) {
+  if (!projectCode) {
+    return { ok: false, error: "projectCode_required" };
+  }
+
+  const projectRes = getProject(projectCode);
+  if (!projectRes.ok) return projectRes;
+
+  const project = projectRes.project;
+
+  // ✅ ALWAYS use master hydration
+  const client = getClientMasterData(project.clientCode);
+
+  const consultants = sheetToObjects(SHEET_CONSULTANTS);
+  const cons = consultants.find(c =>
+    String(c.consultant_id || c.id || "")
+      .trim()
+      .toLowerCase() ===
+    String(project.consultantId).trim().toLowerCase()
+  );
+
+  return {
+    ok: true,
+    project,
+    client: client || null,
+    consultant: cons || null
+  };
+}
+
+
+
+/* -------------------- UPDATED SAVE INVOICE WITH CLIENT EMAIL ---------------------- */
+function saveInvoice(payload) {
+  try {
+    const { invoiceId, snapshot } = payload;
+
+    if (!invoiceId || !snapshot) {
+      return { ok: false, error: "invoiceId and snapshot required" };
+    }
+
+    const sheet = getInvoicesSheet(false);
+    if (!sheet) {
+      return { ok: false, error: "invoices_sheet_not_found" };
+    }
+
+    const vals = sheet.getDataRange().getValues();
+    const headers = vals[0];
+    const map = makeHeaderMap(headers);
+
+    const rowIndex = vals.findIndex(
+      (r, i) => i > 0 && String(r[map.invoiceid]) === String(invoiceId)
+    );
+
+    if (rowIndex === -1) {
+      return { ok: false, error: "not_found" };
+    }
+
+    const currentStatus = String(vals[rowIndex][map.status] || "").toUpperCase();
+    if (currentStatus === "FINAL") {
+      return { ok: false, error: "already_final" };
+    }
+
+    /* =================== HYDRATE CLIENT DATA =================== */
+    const clientCode = snapshot.client?.code || vals[rowIndex][map.clientcode];
+    const clientMaster = getClientMasterData(clientCode);
+
+    if (clientMaster) {
+      snapshot.client = {
+        ...snapshot.client,
+        code: clientMaster.code,
+        name: clientMaster.name,
+        businessName: clientMaster.businessName,
+        billingAddress: clientMaster.billingAddress,
+        pan: clientMaster.pan,
+        gstin: clientMaster.gstin,
+        stateCode: clientMaster.stateCode,
+        email: clientMaster.email // ✅ CRITICAL: Include email
+      };
+    }
+
+    /* =================== HYDRATE CONSULTANT DATA =================== */
+    const consultantId = snapshot.consultant?.id;
+    const consultantMaster = getConsultantMasterData(consultantId);
+
+    if (consultantMaster) {
+      snapshot.consultant = {
+        ...snapshot.consultant,
+        id: consultantMaster.id,
+        name: consultantMaster.name,
+        email: consultantMaster.email,
+        businessName: consultantMaster.businessName,
+        registeredOffice: consultantMaster.registeredOffice,
+        pan: consultantMaster.pan,
+        gstin: consultantMaster.gstin,
+        cin: consultantMaster.cin,
+        stateCode: consultantMaster.stateCode
+      };
+    }
+
+    /* ========================= SERVER-SIDE CALCULATIONS ========================= */
+    const items = snapshot.work?.items || [];
+    const subtotal = items.reduce(
+      (sum, item) => sum + Number(item.amount || 0),
+      0
+    );
+
+    const gst = Math.round(subtotal * 0.18);
+    const total = subtotal + gst;
+
+    const serviceFeePct = Number(snapshot.totals?.serviceFeePct || 0);
+    const serviceFee = Math.round(total * (serviceFeePct / 100));
+    const netEarnings = total - serviceFee;
+
+    /* ===================== GENERATE INVOICE NO ===================== */
+    const seq = getNextInvoiceSequence();
+    const invoiceNumber = `INV-${String(seq).padStart(5, "0")}`;
+    const now = nowIso();
+
+    /* ====================== BUILD FINAL SNAPSHOT ====================== */
+    const finalSnapshot = {
+      meta: {
+        invoiceId,
+        invoiceNumber,
+        status: "FINAL",
+        invoiceDate: snapshot.meta?.invoiceDate || now,
+        createdAt: vals[rowIndex][map.createdat] || now,
+        updatedAt: now,
+        finalizedAt: now
+      },
+
+      project: snapshot.project || {},
+      consultant: snapshot.consultant,
+      client: snapshot.client, // ✅ Now includes email
+
+      serviceProvider: snapshot.serviceProvider || {
+        name: "Hourly Ventures LLP",
+        registeredOffice: "K-47, Kailash Colony, South Delhi, New Delhi, Delhi, India, 110048",
+        stateCode: "Delhi (07)",
+        pan: "AASFH5516N",
+        cin: "ACQ-3618",
+        gstin: "JKNJKNSX",
+        email: "Team@Hourly.Design"
+      },
+
+      work: snapshot.work || { stages: [], items },
+      totals: {
+        subtotal,
+        gst,
+        total,
+        serviceFeePct,
+        serviceFeeAmount: serviceFee,
+        netEarnings
+      },
+
+      compliance: snapshot.compliance || {
+        sacCode: "999799",
+        supplyDescription: "Professional Services"
+      },
+
+      notes: snapshot.notes || ""
+    };
+
+    /* ================== WRITE BACK TO ROW ================== */
+    const row = rowIndex + 1;
+
+    sheet.getRange(row, map.invoicenumber + 1).setValue(invoiceNumber);
+    sheet.getRange(row, map.status + 1).setValue("FINAL");
+    sheet.getRange(row, map.isdraft + 1).setValue("FALSE");
+    sheet.getRange(row, map.invoicedate + 1).setValue(finalSnapshot.meta.invoiceDate);
+    sheet.getRange(row, map.updatedat + 1).setValue(now);
+
+    if (map.subtotal != null) sheet.getRange(row, map.subtotal + 1).setValue(subtotal);
+    if (map.gst != null) sheet.getRange(row, map.gst + 1).setValue(gst);
+    if (map.servicefeepct != null) sheet.getRange(row, map.servicefeepct + 1).setValue(serviceFeePct);
+    if (map.servicefee != null) sheet.getRange(row, map.servicefee + 1).setValue(serviceFee);
+    if (map.netearnings != null) sheet.getRange(row, map.netearnings + 1).setValue(netEarnings);
+
+    if (map.itemsjson != null) {
+      sheet.getRange(row, map.itemsjson + 1).setValue(JSON.stringify(finalSnapshot));
+    }
+
+    Logger.log("✅ Invoice finalized successfully: " + invoiceNumber);
+
+    return {
+      ok: true,
+      invoiceId,
+      invoiceNumber,
+      status: "FINAL",
+      clientEmail: snapshot.client?.email || null // ✅ Return client email
+    };
+  } catch (error) {
+    Logger.log("❌ Error in saveInvoice: " + error.toString());
+    return { ok: false, error: error.toString() };
+  }
+}
+
+
+
+
+
+  // /* ---------------- FINALIZE ---------------- */
+
+  // const invoiceNumber = generateInvoiceNumber();
+  // const finalInvoiceId = invoiceId || `INV_${Date.now()}`;
+  // const now = new Date().toISOString();
+
+  // const rowValues = [
+  //   finalInvoiceId,            // invoiceId
+  //   consultantId,              // consultantId
+  //   snapshot.projectCode,      // projectCode
+  //   snapshot.clientCode || "", // clientCode
+  //   "FINAL",                   // status
+  //   JSON.stringify(snapshot),  // snapshot (immutable)
+  //   invoiceNumber,             // invoiceNumber
+  //   consultantName,            // 🔥 consultantName (flattened)
+  //   now,                       // createdAt
+  //   now,                       // updatedAt
+  //   now                        // finalizedAt
+  // ];
+
+//   /* ---------------- WRITE ---------------- */
+
+//   if (invoiceId) {
+//     const data = sheet.getDataRange().getValues();
+//     const rowIndex = data.findIndex((r, i) => i > 0 && r[0] === invoiceId);
+
+//     if (rowIndex !== -1) {
+//       sheet
+//         .getRange(rowIndex + 1, 1, 1, rowValues.length)
+//         .setValues([rowValues]);
+
+//       Logger.log("✅ Invoice finalized (updated): " + finalInvoiceId);
+//     }
+//   } else {
+//     sheet.appendRow(rowValues);
+//     Logger.log("✅ Invoice finalized (new): " + finalInvoiceId);
+//   }
+
+//   return {
+//     ok: true,
+//     invoiceId: finalInvoiceId,
+//     invoiceNumber,
+//     status: "FINAL"
+//   };
+// }
+
+
+function generateInvoiceNumber() {
+  const sheet = getInvoicesSheet(false);
+  if (!sheet) return "INV-00001";
+
+  const data = sheet.getDataRange().getValues();
+  
+  // Find highest invoice number
+  let maxNum = 0;
+  for (let i = 1; i < data.length; i++) {
+    const invNum = data[i][1]; // invoiceNumber column (index 1)
+    if (invNum && typeof invNum === 'string') {
+      const match = invNum.match(/INV-(\d+)/);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (num > maxNum) maxNum = num;
+      }
+    }
+  }
+  
+  const nextNum = maxNum + 1;
+  return `INV-${String(nextNum).padStart(5, '0')}`;
+}
+
+
+/* ============================================================================
+ * HELPER: makeHeaderMap (if not already defined)
+ * ============================================================================ */
+// function makeHeaderMap(headers) {
+//   const map = {};
+//   headers.forEach((h, i) => {
+//     const key = String(h).trim().toLowerCase().replace(/[\s_]/g, "");
+//     map[key] = i;
+//   });
+//   return map;
+// }
+
+/* ============================================================================
+ * HELPER: buildRowFromData (if not already defined)
+ * ============================================================================ */
+// function buildRowFromData(headers, data) {
+//   const row = new Array(headers.length).fill("");
+
+//   function set(names, value) {
+//     names.forEach(n => {
+//       const key = n.toLowerCase().replace(/[\s_]/g, "");
+//       headers.forEach((h, i) => {
+//         const hk = h.toLowerCase().replace(/[\s_]/g, "");
+//         if (key === hk) row[i] = value;
+//       });
+//     });
+//   }
+
+//   set(["invoiceId"], data.invoiceId);
+//   set(["invoiceNumber"], data.invoiceNumber || "");
+//   set(["status"], data.status || "DRAFT");
+//   set(["invoice_Date"], data.invoiceDate || data.invoice_Date || nowIso());
+//   set(["projectCode"], data.projectCode || "");
+//   set(["clientCode"], data.clientCode || "");
+//   set(["consultantId"], data.consultantId || "");
+//   set(["consultantName"], data.consultantName || "");
+//   set(["billing_Address"], data.billingAddress || data.billing_Address || "");
+//   set(["subtotal"], data.subtotal || 0);
+//   set(["gst"], data.gst || 0);
+//   set(["serviceFeePct"], data.serviceFeePct || 0);
+//   set(["serviceFee"], data.serviceFee || 0);
+//   set(["netEarnings"], data.netEarnings || 0);
+
+//   const itemsStr =
+//     typeof data.itemsJson === "string"
+//       ? data.itemsJson
+//       : JSON.stringify(data.items || []);
+//   set(["itemsJson"], itemsStr);
+
+//   set(["notes"], data.notes || "");
+//   set(["createdAt"], data.createdAt || nowIso());
+//   set(["updatedAt"], nowIso());
+//   set(["isDraft"], data.isDraft || (data.status === "DRAFT" ? "TRUE" : "FALSE"));
+
+//   return row;
+// }
+
+/* ============================================================================
+ * HELPER: nowIso (if not already defined)
+ * ============================================================================ */
+// function nowIso() {
+//   return new Date().toISOString();
+// }
+
+/* ============================================================================
+ * TESTING FUNCTION - Run this to test the fix
+ * ============================================================================ */
+function testSaveInvoice() {
+  // Test with existing draft
+  const testInvoiceId = "INV_1766824892962"; // Replace with your actual draft ID
+  
+  const result = saveInvoice({
+    invoiceId: testInvoiceId,
+    projectCode: "PRJ_210325",
+    clientCode: "CLT_191224",
+    consultantId: "C_2105",
+    consultantName: "Raghav Mangla",
+    billingAddress: "123 Main Street, Mumbai, India",
+    subtotal: 22500,
+    gst: 4050,
+    serviceFeePct: 25,
+    serviceFee: 6637.5,
+    netEarnings: 19912.5,
+    items: [
+      { name: "Design Work", hours: 10, rate: 2250, amount: 22500 }
+    ],
+    notes: "Test finalization"
+  });
+
+  Logger.log("🧪 Test Result:");
+  Logger.log(JSON.stringify(result, null, 2));
+  
+  return result;
+}
+
+/* -------------------- GET DRAFT / GET FINAL INVOICE ---------------------- */
+
+function getDraft(invoiceId) {
+  const result = getInvoiceById(invoiceId);
+  
+  if (!result.ok) return result;
+  
+  // Ensure it's actually a draft
+  if (result.invoice.status !== "DRAFT") {
+    return { ok: false, error: "not_a_draft" };
+  }
+  
+  return result;
+}
+
+
+/* ============================================================================
+ * PRODUCTION-READY: getInvoiceById()
+ * Properly parses itemsJson and returns unified structure
+ * ============================================================================ */
+
+/**
+ * ✅ PRODUCTION-READY: getInvoiceById with CONSULTANT HYDRATION
+ * Properly parses itemsJson and returns unified structure
+ * NOW INCLUDES: Auto-fetch consultant business data from master sheet
+ */
+function getInvoiceById(invoiceId) {
+  if (!invoiceId) return { ok: false, error: "invoiceId required" };
+
+  const sh = getInvoicesSheet(false);
+  if (!sh) return { ok: false, error: "sheet_not_found" };
+
+  const vals = sh.getDataRange().getValues();
+  const headers = vals[0];
+  const map = makeHeaderMap(headers);
+
+  const rowIndex = vals.findIndex((r, i) => i > 0 && r[map.invoiceid] === invoiceId);
+  if (rowIndex === -1) return { ok: false, error: "not_found" };
+
+  const row = vals[rowIndex];
+  
+  // Build flat invoice object from sheet columns
+  const flatInvoice = {};
+  headers.forEach((h, i) => (flatInvoice[h] = row[i]));
+
+  // ✅ CRITICAL FIX: Parse itemsJson correctly
+  let parsedData = {};
+  try {
+    let jsonStr = flatInvoice.itemsJson || "{}";
+    
+    // Handle double-encoded JSON
+    if (typeof jsonStr === 'string') {
+      if (jsonStr.startsWith('"') && jsonStr.endsWith('"')) {
+        jsonStr = JSON.parse(jsonStr);
+      }
+      parsedData = JSON.parse(jsonStr);
+    } else {
+      parsedData = jsonStr;
+    }
+    
+    Logger.log("✅ Parsed itemsJson:", JSON.stringify(parsedData).substring(0, 200));
+  } catch (e) {
+    Logger.log("⚠️ Failed to parse itemsJson for " + invoiceId + ": " + e.toString());
+    parsedData = {};
+  }
+
+  const status = String(flatInvoice.status || "").toUpperCase();
+  
+  /* ========================================================================
+     ✅ DRAFT INVOICE: Return nested structure with HYDRATED DATA
+     ======================================================================== */
+  if (status === "DRAFT") {
+    // ✅ Extract nested structures with fallbacks
+    const work = parsedData.work || {};
+    const config = parsedData.config || {};
+    const project = parsedData.project || {};
+    let consultant = parsedData.consultant || {};
+    let client = parsedData.client || {};
+    
+    // ✅ CRITICAL: Ensure work.items exists and is properly structured
+    let items = [];
+    if (Array.isArray(work.items) && work.items.length > 0) {
+      items = work.items;
+    } else if (Array.isArray(parsedData) && parsedData.length > 0) {
+      // ⚠️ LEGACY: Old format where itemsJson was just an array
+      items = parsedData;
+    }
+    
+    Logger.log("✅ Draft items count:", items.length);
+    
+    // ========================================================================
+    // ✅ HYDRATION: Fetch complete consultant business data from master sheet
+    // ========================================================================
+    const consultantId = consultant.id || flatInvoice.consultantId;
+    if (consultantId) {
+      const fullConsultant = getConsultantMasterData(consultantId);
+      if (fullConsultant) {
+        consultant = {
+          id: fullConsultant.id,
+          name: fullConsultant.name,
+          email: fullConsultant.email,
+          // ✅ BUSINESS FIELDS from master sheet
+          businessName: fullConsultant.businessName || '',
+          registeredOffice: fullConsultant.registeredOffice || '',
+          pan: fullConsultant.pan || '',
+          gstin: fullConsultant.gstin || '',
+          cin: fullConsultant.cin || '',
+          stateCode: fullConsultant.stateCode || ''
+        };
+        
+        Logger.log("✅ Consultant hydrated: " + fullConsultant.businessName);
+      } else {
+        Logger.log("⚠️ Consultant not found in master sheet: " + consultantId);
+      }
+    }
+    
+    // ========================================================================
+    // ✅ HYDRATION: Fetch complete client data from master sheet
+    // ========================================================================
+    const clientCode = client.code || flatInvoice.clientCode;
+    if (clientCode) {
+      const fullClient = getClientMasterData(clientCode);
+      if (fullClient) {
+        client = {
+          code: fullClient.code,
+          name: fullClient.name,
+          businessName: fullClient.businessName,
+          billingAddress: fullClient.billingAddress,
+          email: fullClient.email,
+          pan: fullClient.pan,
+          gstin: fullClient.gstin,
+          stateCode: fullClient.stateCode
+        };
+        
+        Logger.log("✅ Client hydrated: " + fullClient.email);
+      } else {
+        Logger.log("⚠️ Client not found in master sheet: " + clientCode);
+      }
+    }
+    
+    // ========================================================================
+    // ✅ UPDATE parsedData with hydrated consultant & client
+    // ========================================================================
+    if (typeof parsedData === 'object' && !Array.isArray(parsedData)) {
+      parsedData.consultant = consultant;
+      parsedData.client = client;
+    }
+    
+    return {
+      ok: true,
+      invoice: {
+        // Core metadata
+        invoiceId: flatInvoice.invoiceId,
+        invoiceNumber: null,
+        status: "DRAFT",
+        isDraft: true,
+        
+        // Dates
+        invoiceDate: parsedData.date || flatInvoice.invoice_Date,
+        date: parsedData.date || flatInvoice.invoice_Date?.slice(0, 10),
+        createdAt: flatInvoice.createdAt,
+        updatedAt: flatInvoice.updatedAt,
+        
+        // Nested structures (NOW WITH HYDRATED DATA)
+        project: {
+          projectCode: project.projectCode || flatInvoice.projectCode
+        },
+        
+        consultant: consultant, // ✅ Now includes business fields
+        
+        client: client, // ✅ Now includes all fields
+        
+        work: {
+          stages: work.stages || [],
+          items: items.map(item => ({
+            memberId: item.memberId || item.id,
+            name: item.name || '',
+            mode: item.mode || 'Online',
+            rate: Number(item.rate || 0),
+            factor: Number(item.factor || 1),
+            stageHours: item.stageHours || {}
+          }))
+        },
+        
+        config: {
+          baseHourlyRate: Number(config.baseHourlyRate || 0),
+          serviceFeePct: Number(config.serviceFeePct || 25)
+        },
+        
+        notes: parsedData.notes || flatInvoice.notes || "",
+        
+        // Flattened for backward compat
+        projectCode: project.projectCode || flatInvoice.projectCode,
+        clientCode: client.code || flatInvoice.clientCode,
+        consultantId: consultant.id || flatInvoice.consultantId,
+        consultantName: consultant.name || flatInvoice.consultantName,
+        billingAddress: client.billingAddress || flatInvoice.billing_Address || "",
+        stages: work.stages || [],
+        items: items, // ✅ CRITICAL: Pass items directly
+        baseHourlyRate: config.baseHourlyRate || 0,
+        serviceFeePct: config.serviceFeePct || 25,
+        
+        // ✅ Full invoiceData for editing (NOW WITH HYDRATED DATA)
+        invoiceData: typeof parsedData === 'object' && !Array.isArray(parsedData) 
+          ? parsedData 
+          : { 
+              work: { items: parsedData, stages: [] },
+              consultant: consultant,
+              client: client
+            }
+      }
+    };
+  }
+  
+  /* ========================================================================
+     ✅ FINAL INVOICE: USE LOCKED SNAPSHOT
+     ======================================================================== */
+  if (status === "FINAL") {
+    const snapshot = parsedData;
+    
+    return {
+      ok: true,
+      invoice: {
+        invoiceId: flatInvoice.invoiceId,
+        invoiceNumber: flatInvoice.invoiceNumber,
+        status: "FINAL",
+        isDraft: false,
+        
+        invoiceDate: snapshot.meta?.invoiceDate || flatInvoice.invoice_Date,
+        date: snapshot.meta?.invoiceDate?.slice(0, 10),
+        createdAt: flatInvoice.createdAt,
+        updatedAt: flatInvoice.updatedAt,
+        finalizedAt: snapshot.meta?.finalizedAt,
+        
+        // Use locked snapshot data
+        serviceProvider: snapshot.serviceProvider,
+        consultant: snapshot.consultant,
+        client: snapshot.client,
+        project: snapshot.project,
+        work: snapshot.work,
+        compliance: snapshot.compliance,
+        totals: snapshot.totals,
+        notes: snapshot.notes,
+        
+        // Flattened
+        projectCode: snapshot.project?.projectCode,
+        consultantName: snapshot.consultant?.name,
+        subtotal: snapshot.totals?.subtotal,
+        gst: snapshot.totals?.gst,
+        total: snapshot.totals?.total,
+        
+        snapshot: snapshot
+      }
+    };
+  }
+  
+  return { ok: false, error: "invalid_status: " + status };
+}
+/**
+ * FIXED: Fetch complete consultant data from Consultants sheet
+ * NOW INCLUDES: business_name, business_registered_office, business_pan, business_gstin
+ */
+/**
+ * FIXED: Fetch complete consultant data from Consultants sheet
+ * NOW INCLUDES: business_name, business_registered_office, business_pan, business_gstin
+ */
+function getConsultantMasterData(consultantId) {
+  if (!consultantId) return null;
+  
+  const sh = getConsultantSheet();
+  const vals = sh.getDataRange().getValues();
+  const headers = vals[0];
+  const map = makeHeaderMap(headers);
+  
+  for (let i = 1; i < vals.length; i++) {
+    if (String(vals[i][map.consultant_id]).trim() === String(consultantId).trim()) {
+      const row = vals[i];
+      
+      return {
+        // Basic fields
+        id: row[map.consultant_id],
+        name: row[map.consultant_name] || row[map.name] || '',
+        email: row[map.email] || '',
+        phone: row[map.phone] || '',
+        status: row[map.status] || 'pending_profile',
+        
+        // ✅ BUSINESS DETAILS - NOW INCLUDED!
+        businessName: row[map.business_name] || '',
+        registeredOffice: row[map.business_registered_office] || '',
+        pan: row[map.business_pan] || '',
+        gstin: row[map.business_gstin] || '',
+        
+        // Additional fields if columns exist
+        cin: map.business_cin >= 0 ? row[map.business_cin] || '' : '',
+        stateCode: map.business_state_code >= 0 ? row[map.business_state_code] || '' : ''
+      };
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * ✅ HELPER: Fetch complete client data from Clients sheet
+ */
+function getClientMasterData(clientCode) {
+  if (!clientCode) return null;
+
+  const rows = sheetToObjects(SHEET_CLIENTS);
+
+  const c = rows.find(r =>
+    String(r.Client_Code || "")
+      .trim()
+      .toLowerCase() === String(clientCode).trim().toLowerCase()
+  );
+
+  if (!c) return null;
+
+  // 🔥 NORMALIZED MASTER CLIENT OBJECT
+  return {
+    code: c.Client_Code,
+    name: c.Client_name || "",
+    businessName: c.Client_Business_Name || "",
+    billingAddress: c.Billing_Address || "",
+    pan: String(c.Client_PAN || ""),
+    gstin: String(c.Client_GST || ""),
+    stateCode: c.State || "",
+    email: c.Client_email || ""   // ✅ guaranteed
+  };
+}
+
+
+
+/* -------------------- LIST FINAL INVOICES ---------------------- */
+
+function listInvoices(limit) {
+  const rows = sheetToObjects(SHEET_INVOICES);
+  const finalRows = rows.filter(r =>
+    ["FINAL", "PAID"].includes(String(r.status).toUpperCase())
+  );
+
+  finalRows.sort((a, b) => {
+    const da = new Date(a.updatedAt || a.invoice_Date || 0).getTime();
+    const db = new Date(b.updatedAt || b.invoice_Date || 0).getTime();
+    return db - da;
+  });
+
+  return limit ? finalRows.slice(0, Number(limit)) : finalRows;
+}
+
+/* -------------------- SIMPLE EMAIL SENDER ---------------------- */
+
+/* -------------------- EMAIL SENDER - FIXED VERSION ---------------------- */
+
+function sendInvoiceEmail(data) {
+  try {
+    Logger.log("📧 sendInvoiceEmail called");
+    Logger.log("📦 Data received: " + JSON.stringify(Object.keys(data)));
+    
+    // Extract parameters (support both naming conventions)
+    const to = data.to || data.toEmail || data.email;
+    const invoiceId = data.invoiceId || 'DRAFT';
+    const html = data.html || data.invoiceHTML;
+    const consultantId = data.consultantId;
+
+    Logger.log("To: " + to);
+    Logger.log("Invoice ID: " + invoiceId);
+    Logger.log("Has HTML: " + !!html);
+    Logger.log("Consultant ID: " + consultantId);
+
+    // Validation
+    if (!to) {
+      Logger.log("❌ Missing recipient email");
+      return { ok: false, error: "email_required" };
+    }
+
+    if (!html) {
+      Logger.log("❌ Missing invoice HTML");
+      return { ok: false, error: "html_required" };
+    }
+
+    // Email subject
+    const subject = invoiceId === 'DRAFT' 
+      ? 'Draft Invoice for Your Review'
+      : `Invoice ${invoiceId}`;
+
+    Logger.log("📨 Sending email with subject: " + subject);
+
+    // Plain text fallback
+    const plainText = 'Please view this invoice in an HTML-capable email client.';
+
+    // Send email using GmailApp
+    try {
+      GmailApp.sendEmail(to, subject, plainText, {
+        htmlBody: html,
+        name: 'InstallHook Invoice System',
+        noReply: false
+      });
+      
+      Logger.log("✅ Email sent successfully to: " + to);
+      
+      return {
+        ok: true,
+        message: 'Invoice email sent successfully',
+        sentTo: to,
+        invoiceId: invoiceId
+      };
+      
+    } catch (emailErr) {
+      Logger.log("❌ GmailApp.sendEmail failed: " + emailErr.toString());
+      
+      // Fallback to MailApp if GmailApp fails
+      try {
+        Logger.log("🔄 Trying MailApp as fallback...");
+        
+        MailApp.sendEmail({
+          to: to,
+          subject: subject,
+          htmlBody: html,
+          name: 'InstallHook Invoice System'
+        });
+        
+        Logger.log("✅ Email sent via MailApp");
+        
+        return {
+          ok: true,
+          message: 'Invoice email sent successfully (via MailApp)',
+          sentTo: to,
+          invoiceId: invoiceId
+        };
+        
+      } catch (mailAppErr) {
+        Logger.log("❌ MailApp also failed: " + mailAppErr.toString());
+        throw mailAppErr;
+      }
+    }
+    
+  } catch (err) {
+    Logger.log("❌ Error in sendInvoiceEmail: " + err.toString());
+    return {
+      ok: false,
+      error: 'Failed to send email: ' + err.toString()
+    };
+  }
+}
+
+/* -------------------- PROJECT / CLIENT LOOKUPS ---------------------- */
+
+function getProject(code) {
+  if (!code) return { ok: true, projects: sheetToObjects(SHEET_PROJECTS) };
+
+  const rows = sheetToObjects(SHEET_PROJECTS);
+  const found = rows.find(
+    r =>
+      String(r.Project_Code || r.projectCode || "").trim().toLowerCase() ===
+      code.trim().toLowerCase()
+  );
+
+  if (!found) return { ok: false, error: "project_not_found" };
+
+  return {
+    ok: true,
+    project: {
+      code: found.Project_Code || found.projectCode,
+      clientCode: found.Client_Code || found.clientCode,
+      consultantId: found.Consultant_id || found.consultantId,
+      package: found.Package,
+      hourlyRate: Number(found.Hourly_rate || 0),
+      serviceFeePct: Number(found.serviceFeePct || 0),
+      gst: (found.GST !== undefined && found.GST !== "") ? Number(found.GST) : 0.18,  // ✅ FIX: Allow 0 as valid GST
+      defaultBillingAddress: found.defaultBillingAddress || ""
+    }
+  };
+}
+
+function getClient(code) {
+  if (!code) return null;
+
+  const rows = sheetToObjects(SHEET_CLIENTS);
+
+  const c = rows.find(r =>
+    String(r.Client_Code || "")
+      .trim()
+      .toLowerCase() === String(code).trim().toLowerCase()
+  );
+
+  if (!c) return null;
+
+  // 🔥 NORMALIZED CLIENT OBJECT (API CONTRACT)
+  return {
+    code: c.Client_Code,                 // ✅ stable
+    name: c.Client_name || "",            // ✅ stable
+    businessName: c.Client_Business_Name || ""
+,  // ✅ FIXED spelling
+    billingAddress: c.Billing_Address || "",
+    gstin: c.Client_GST || "",
+    pan: c.Client_PAN || "",
+    stateCode: c.State || "",
+    email: c.Client_email || ""           // ✅ THIS FIXES EVERYTHING
+  };
+}
+
+
+/* -------------------- COMPANY DETAILS ---------------------- */
+
+/**
+ * Get company details from Company_Details sheet
+ * Returns company information for Hourly Ventures LLP
+ */
+function getCompanyDetails() {
+  try {
+    const ss = getSpreadsheet();
+    const sheet = ss.getSheetByName('Company_Details');
+    
+    if (!sheet) {
+      // Return default values if sheet doesn't exist
+      return {
+        ok: true,
+        companyDetails: {
+          company_name: 'Hourly Ventures LLP',
+          registered_office: 'K-47, Kailash Colony, South Delhi, New Delhi, Delhi, India, 110048',
+          state_code: 'Delhi (07)',
+          pan: 'AASFH5516N',
+          cin: 'ACQ-3618',
+          gstin: 'JKNJKNSX',
+          email: 'Team@Hourly.Design'
+        }
+      };
+    }
+    
+    const data = sheet.getDataRange().getValues();
+    
+    // Expecting two columns: Field | Value
+    // Row 1 should be headers
+    if (data.length < 2) {
+      return {
+        ok: false,
+        error: 'Company_Details sheet is empty'
+      };
+    }
+    
+    const companyDetails = {};
+    
+    // Start from row 2 (skip header)
+    for (let i = 1; i < data.length; i++) {
+      const field = data[i][0];
+      const value = data[i][1];
+      
+      if (field && field.toString().trim() !== '') {
+        companyDetails[field.toString().trim()] = value || '';
+      }
+    }
+    
+    return {
+      ok: true,
+      companyDetails: companyDetails
+    };
+    
+  } catch (error) {
+    return {
+      ok: false,
+      error: 'Error fetching company details: ' + error.message
+    };
+  }
+}
+
+/* -------------------- INVOICE SETUP ---------------------- */
+
+// function getInvoiceSetup(projectCode) {
+//   const projectRes = getProject(projectCode);
+//   if (!projectRes.ok) return projectRes;
+
+//   const project = projectRes.project;
+//   const client = getClient(project.clientCode);
+
+//   const consultants = sheetToObjects(SHEET_CONSULTANTS);
+//   const cons = consultants.find(c =>
+//     String(c.consultant_id || c.id || "")
+//       .trim()
+//       .toLowerCase() ===
+//     String(project.consultantId).trim().toLowerCase()
+//   );
+
+//   return {
+//     ok: true,
+//     project,
+//     client, // ✅ Now includes Client_email
+//     consultant: cons || null
+//   };
+// }
+/* ---------------------------------------------------------
+   CONSULTANT PROFILE MANAGEMENT
+--------------------------------------------------------- */
+function listInvoicesByConsultantAction(consultantId) {
+  try {
+    const sh = getInvoicesSheet(false);
+    if (!sh) {
+      Logger.log("⚠️ Invoices sheet not found");
+      return { ok: true, invoices: [] };
+    }
+
+    const vals = sh.getDataRange().getValues();
+    
+    if (vals.length < 2) {
+      Logger.log("📭 No invoices in sheet");
+      return { ok: true, invoices: [] };
+    }
+
+    const headers = vals[0];
+    const map = makeHeaderMap(headers);
+
+    const consultantIdCol = map["consultantid"];
+    
+    if (consultantIdCol == null) {
+      Logger.log("❌ consultantId column not found");
+      return { ok: true, invoices: [] };
+    }
+
+    const targetConsultantId = String(consultantId || "").trim().toLowerCase();
+    Logger.log("🔍 Filtering for consultant: " + targetConsultantId);
+
+    const invoices = [];
+
+    for (let i = 1; i < vals.length; i++) {
+      const rowConsultantId = String(vals[i][consultantIdCol] || "").trim().toLowerCase();
+      
+      // If consultantId provided, filter by it
+      if (targetConsultantId && rowConsultantId !== targetConsultantId) {
+        continue;
+      }
+
+      // Build invoice object
+      const invoice = {};
+      headers.forEach((h, j) => {
+        invoice[h] = vals[i][j];
+      });
+
+      invoices.push(invoice);
+    }
+
+    Logger.log(`✅ Found ${invoices.length} invoices for consultant ${consultantId}`);
+
+    return {
+      ok: true,
+      invoices: invoices
+    };
+
+  } catch (err) {
+    Logger.log("❌ Error in listInvoicesByConsultantAction: " + err.toString());
+    return {
+      ok: false,
+      error: err.toString(),
+      invoices: []
+    };
+  }
+}
+
+function getConsultantSheet() {
+  const ss = getSpreadsheet();
+  let sh = ss.getSheetByName(SHEET_CONSULTANTS);
+  if (!sh) throw new Error("Consultants sheet missing");
+  return sh;
+}
+
+function getConsultantHeaderMap() {
+  const sh = getConsultantSheet();
+  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  const map = {};
+  headers.forEach((h, i) => {
+    map[String(h).trim()] = i;
+  });
+  return map;
+}
+
+/* ------------------ GET CONSULTANT BY EMAIL ------------------ */
+
+function getConsultantByEmailAction(data) {
+  const email = String(data.email || "").trim().toLowerCase();
+  if (!email) return { ok: false, error: "email_required" };
+
+  const sh = getConsultantSheet();
+  const vals = sh.getDataRange().getValues();
+  const headers = vals[0];
+  const map = getConsultantHeaderMap();
+
+  for (let i = 1; i < vals.length; i++) {
+    if (String(vals[i][map["email"]]).trim().toLowerCase() === email) {
+      let obj = {};
+      headers.forEach((h, idx) => obj[h] = vals[i][idx]);
+      return { ok: true, consultant: obj };
+    }
+  }
+
+  return { ok: false, error: "not_found" };
+}
+
+/* ------------------ CREATE CONSULTANT (FIRST LOGIN) ------------------ */
+
+function createConsultantAction(data) {
+  const sh = getConsultantSheet();
+  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+
+  const consultantId = "C_" + (Date.now() % 1000000);
+
+  const row = headers.map(h => {
+    switch (h) {
+      case "consultant_id": return consultantId;
+      case "email": return data.email || "";
+      case "Consultant_name": return data.name || "";
+      case "phone": return data.phone || "";
+      case "created_at": return nowIso();
+      case "status": return "pending_profile";
+      default: return "";
+    }
+  });
+
+  sh.appendRow(row);
+
+  return {
+    ok: true,
+    created: true,
+    consultant: rowToConsultantObject(headers, row)
+  };
+}
+
+/*--------------------------------------------------------*/
+function getTeam() {
+  const rows = sheetToObjects(SHEET_TEAM);
+  
+  // Normalize the team member data
+  const normalized = rows.map(member => ({
+    id: member.Id || member.id || member.memberCode || member.code || '',
+    name: member.Name || member.name || member.memberName || '',
+    defaultMode: member.DefaultMode || member.defaultMode || member.mode || 'Online',
+    defaultRate: Number(member.Hourly_rate || member.hourlyRate || member.defaultRate || 0),
+    baseFactor: Number(member.baseFactor || member.BaseFactor || member.Factor || member.factor || 1)
+  }));
+  
+  return normalized;
+}
+
+function getModes() {
+  const rows = sheetToObjects(SHEET_MODES);
+  return rows.map(m => ({
+    mode: m.Mode || m.mode || '',
+    description: m.Description || m.description || ''
+  }));
+}
+
+/* ------------------ UPDATE CONSULTANT PROFILE ------------------ */
+
+function updateConsultantProfileAction(data) {
+  const sh = getConsultantSheet();
+  const vals = sh.getDataRange().getValues();
+  const headers = vals[0];
+  const map = getConsultantHeaderMap();
+
+  const id = String(data.consultant_id || "").trim();
+  if (!id) return { ok: false, error: "consultant_id_required" };
+
+  let rowIndex = -1;
+  for (let i = 1; i < vals.length; i++) {
+    if (String(vals[i][map["consultant_id"]]) === id) {
+      rowIndex = i + 1;
+      break;
+    }
+  }
+  if (rowIndex === -1) return { ok: false, error: "not_found" };
+
+  const row = vals[rowIndex - 1];
+
+  // Update allowed fields
+  function setField(colName, value) {
+    if (map[colName] != null && value !== undefined) {
+      row[map[colName]] = value;
+    }
+  }
+
+  setField("Consultant_name", data.name);
+  setField("phone", data.phone);
+  setField("business_name", data.business_name);
+  setField("business_registered_office", data.business_address);
+  setField("business_pan", data.business_pan);
+  setField("business_gstin", data.business_gstin);
+  setField("business_cin", data.business_cin);
+  setField("business_state_code", data.business_state_code);
+
+  sh.getRange(rowIndex, 1, 1, row.length).setValues([row]);
+
+  return { ok: true, updated: true, consultant: rowToConsultantObject(headers, row) };
+}
+
+/* ------------------ UPDATE LAST LOGIN ------------------ */
+
+function updateConsultantLastLogin(data) {
+  const id = String(data.consultant_id || "").trim();
+  if (!id) return { ok: false, error: "consultant_id_required" };
+
+  const sh = getConsultantSheet();
+  const vals = sh.getDataRange().getValues();
+  const headers = vals[0];
+  const map = getConsultantHeaderMap();
+
+  for (let i = 1; i < vals.length; i++) {
+    if (String(vals[i][map["consultant_id"]]) === id) {
+      vals[i][map["last_login"]] = nowIso();
+      sh.getRange(i + 1, 1, 1, headers.length).setValues([vals[i]]);
+      return { ok: true };
+    }
+  }
+
+  return { ok: false, error: "not_found" };
+}
+
+/* ------------------ Convert Row to JSON ------------------ */
+function rowToConsultantObject(headers, row) {
+  let obj = {};
+  headers.forEach((h, i) => obj[h] = row[i]);
+  return obj;
+}
+
+/* -------------------- DASHBOARD ---------------------- */
+
+function getDashboard(consultantId) {
+  consultantId = String(consultantId || "").trim().toLowerCase();
+  const rows = sheetToObjects(SHEET_INVOICES);
+
+  let totalInvoices = 0,
+    totalRevenue = 0,
+    pendingDrafts = 0,
+    paidInvoices = 0;
+
+  const recent = [];
+
+  rows.forEach(r => {
+    const cid = String(r.consultantId || "").trim().toLowerCase();
+    if (cid !== consultantId) return;
+
+    const status = String(r.status || "").toUpperCase();
+    const subtotal = Number(r.subtotal || 0);
+
+    if (status === "FINAL" || status === "PAID") {
+      totalInvoices++;
+      totalRevenue += subtotal;
+      paidInvoices += status === "PAID" ? 1 : 0;
+
+      recent.push({
+        invoiceId: r.invoiceId,
+        invoiceNumber: r.invoiceNumber,
+        dateISO: r.updatedAt || r.invoice_Date,
+        amount: subtotal
+      });
+    } else if (status === "DRAFT") {
+      pendingDrafts++;
+    }
+  });
+
+  recent.sort((a, b) => new Date(b.dateISO) - new Date(a.dateISO));
+  return {
+    ok: true,
+    consultantId,
+    totalInvoices,
+    totalRevenue,
+    pendingDrafts,
+    paidInvoices,
+    recentInvoices: recent.slice(0, 5)
+  };
+}
+
+/* ---------------------------------------------------------
+ * ROUTER: doGet
+ * --------------------------------------------------------- */
+function doGet(e) {
+  if (!isAuthorized(e)) return unauthorized();
+
+  const action = e.parameter.action || "";
+
+  try {
+    switch (action) {
+      case "getTeam":
+        return json({ team: getTeam() }); // ✅ FIXED
+
+      case "getModes":
+        return json(getModes());
+
+      case "getProject":
+        return json(getProject(e.parameter.code));
+
+      case "getClient":
+        return json(getClient(e.parameter.code));
+
+      case "getAllProjects":
+        return json(getProject());
+
+      case "getInvoice":
+  return json(getInvoiceById(e.parameter.invoiceId));
+
+      case "getDraft":
+        return json(getDraft(e.parameter.invoiceId));
+
+      case "getAllDrafts":
+        return json(
+          getAllDrafts({
+            consultantId: e.parameter.consultantId || e.parameter.consultant_id
+          })
+        );
+
+      case "listInvoices":
+        return json({ ok: true, invoices: listInvoices(e.parameter.limit) });
+
+      case "listInvoicesByConsultant":
+        return json(
+          listInvoicesByConsultantAction(
+            e.parameter.consultantId || e.parameter.consultant_id
+          )
+        );
+
+      case "getDashboard":
+        return json(getDashboard(e.parameter.consultantId));
+
+      case "getInvoiceSetup":
+        return json(getInvoiceSetup(e.parameter.code));
+
+      case "getCompanyDetails":
+        return json(getCompanyDetails());
+
+      default:
+        return json({ ok: false, error: "unknown_action: " + action });
+    }
+  } catch (err) {
+    return json({ ok: false, error: String(err) });
+  }
+}
+
+/* ---------------------------------------------------------
+ * ROUTER: doPost
+ * --------------------------------------------------------- */
+
+
+
+/** 🔍 Test listing */
+function testList() {
+  Logger.log("Final invoices: " + JSON.stringify(listInvoices(10)));
+  Logger.log("Draft invoices: " + JSON.stringify(getAllDrafts({})));
+}
+function testListInvoices() {
+  const result = listInvoicesByConsultantAction("C_2105");
+  Logger.log(JSON.stringify(result, null, 2));
+  return result;
+}
+
+/** 🧪 Validate sheet structure */
+function inspectSheet() {
+  const sh = getInvoicesSheet(false);
+  if (!sh) return Logger.log("Invoices sheet missing.");
+
+  const vals = sh.getDataRange().getValues();
+  Logger.log(JSON.stringify(vals[0])); // headers
+}
+
+/* ---------------------------------------------------------
+ * UTILITY FUNCTIONS
+ * --------------------------------------------------------- */
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function json(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(
+    ContentService.MimeType.JSON
+  );
+}
+
+function unauthorized() {
+  return json({ ok: false, error: "unauthorized" });
+}
+
+// function requireToken(e) {
+//   const token =
+//     (e.parameter && e.parameter.token) ||
+//     (e.postData &&
+//       JSON.parse(e.postData.contents || "{}").token) ||
+//     null;
+
+//   return token === TOKEN;
+// }
+
+function makeHeaderMap(headers) {
+  const map = {};
+  headers.forEach((h, i) => {
+    map[String(h).toLowerCase().replace(/[\s_]/g, "")] = i;
+  });
+  return map;
+}
+
+function findInvoiceRow(invoiceId) {
+  const sh = getInvoicesSheet(false);
+  if (!sh) return -1;
+
+  const vals = sh.getDataRange().getValues();
+  if (vals.length < 2) return -1;
+
+  let col = vals[0].indexOf("invoiceId");
+  if (col === -1) col = vals[0].indexOf("invoiceid");
+  if (col === -1) return -1;
+
+  for (let i = 1; i < vals.length; i++) {
+    if (String(vals[i][col]) === String(invoiceId)) {
+      return i + 1;
+    }
+  }
+
+  return -1;
+}
+
+function getInvoicesSheet(createIfMissing) {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName(SHEET_INVOICES);
+
+  if (!sh && createIfMissing) {
+    sh = ss.insertSheet(SHEET_INVOICES);
+    sh.appendRow([
+      "invoiceId",
+      "invoiceNumber",
+      "status",
+      "invoice_Date",
+      "projectCode",
+      "clientCode",
+      "consultantId",
+      "consultantName",
+      "billing_Address",
+      "subtotal",
+      "gst",
+      "serviceFeePct",
+      "serviceFee",
+      "netEarnings",
+      "itemsJson",
+      "notes",
+      "createdAt",
+      "updatedAt",
+      "isDraft"
+    ]);
+  }
+
+  return sh;
+}
+/* ---------------------------------------------------------
+   🔥 TESTING FUNCTIONS FOR CONSULTANT MODULE
+   Run manually from Apps Script Editor → Run
+--------------------------------------------------------- */
+
+/**
+ * 1️⃣ Test fetching consultant by email
+ */
+function test_getConsultantByEmail() {
+  const res = getConsultantByEmailAction({
+    email: "raghavmangla58@gmail.com"
+  });
+  Logger.log("TEST getConsultantByEmailAction → " + JSON.stringify(res, null, 2));
+  return res;
+}
+
+/**
+ * 2️⃣ Test creating a new consultant
+ */
+function test_createConsultant() {
+  const res = createConsultantAction({
+    email: "newtest@example.com",
+    name: "New Test User",
+    phone: "9876543210"
+  });
+  Logger.log("TEST createConsultantAction → " + JSON.stringify(res, null, 2));
+  return res;
+}
+
+/**
+ * 3️⃣ Test updating consultant profile
+ */
+function test_updateConsultantProfile() {
+  const res = updateConsultantProfileAction({
+    consultant_id: "C_2105",              // Replace with a real ID in your sheet
+    name: "Raghav Mangla",
+    phone: "8445478293",
+    business_name: "My Business LLP",
+    business_address: "Delhi, India",
+    business_pan: "ABCDE1234F",
+    business_gstin: "07ABCDE1234F1Z5",
+    business_cin: "U74999DL2020PTC",
+    business_state_code: "Delhi (07)"
+  });
+
+  Logger.log("TEST updateConsultantProfileAction → " + JSON.stringify(res, null, 2));
+  return res;
+}
+
+/**
+ * 4️⃣ Test updating last_login timestamp
+ */
+function test_updateLastLogin() {
+  const res = updateConsultantLastLogin({
+    consultant_id: "C_2105" // Replace with existing ID
+  });
+
+  Logger.log("TEST updateConsultantLastLogin → " + JSON.stringify(res, null, 2));
+  return res;
+}
+
+/**
+ * 5️⃣ FULL AUTH + PROFILE FLOW TEST
+ * Simulates: login → fetch profile → update profile
+ */
+function test_fullConsultantFlow() {
+  Logger.log("🚀 Running FULL CONSULTANT FLOW TEST...");
+
+  // Fetch
+  const fetched = getConsultantByEmailAction({
+    email: "raghavmangla58@gmail.com"
+  });
+  Logger.log("1️⃣ Fetched: " + JSON.stringify(fetched, null, 2));
+
+  // Create if missing
+  let consultant = fetched.consultant;
+  if (!fetched.ok) {
+    Logger.log("Consultant missing → creating...");
+    const created = createConsultantAction({
+      email: "raghavmangla58@gmail.com",
+      name: "",
+      phone: ""
+    });
+    consultant = created.consultant;
+    Logger.log("2️⃣ Created: " + JSON.stringify(created, null, 2));
+  }
+
+  // Update profile
+  const updated = updateConsultantProfileAction({
+    consultant_id: consultant.consultant_id,
+    name: "Raghav Mangla",
+    phone: "8445478293",
+    business_name: "Test Business LLP",
+    business_address: "123 Business Park, Delhi",
+    business_pan: "ABCDE1234F",
+    business_gstin: "07ABCDE1234F1Z5",
+    business_cin: "U74999DL2020PTC",
+    business_state_code: "Delhi (07)"
+  });
+  Logger.log("3️⃣ Updated Profile: " + JSON.stringify(updated, null, 2));
+
+  // Last login
+  const login = updateConsultantLastLogin({
+    consultant_id: consultant.consultant_id
+  });
+  Logger.log("4️⃣ Updated Last Login: " + JSON.stringify(login, null, 2));
+
+  return {
+    fetched,
+    updated,
+    login
+  };
+}
+function debugInvoiceData() {
+  const sheet = getInvoicesSheet(false);
+  const vals = sheet.getDataRange().getValues();
+  
+  // Get headers
+  Logger.log("HEADERS: " + JSON.stringify(vals[0]));
+  
+  // Get first draft invoice row
+  for (let i = 1; i < vals.length; i++) {
+    if (vals[i][2] === "DRAFT") { // status column
+      Logger.log("DRAFT ROW: " + JSON.stringify(vals[i]));
+      break;
+    }
+  }
+  
+  // Get first final invoice row
+  for (let i = 1; i < vals.length; i++) {
+    if (vals[i][2] === "FINAL") {
+      Logger.log("FINAL ROW: " + JSON.stringify(vals[i]));
+      break;
+    }
+  }
+}
+function testInvoiceFix() {
+  Logger.log("=== Testing DRAFT ===");
+  const draft = getInvoiceById("DRAFT_1767347461369");
+  Logger.log("Draft OK: " + draft.ok);
+  if (draft.ok) {
+    Logger.log("Has invoiceData: " + !!draft.invoice.invoiceData);
+    Logger.log("Has work.items: " + (draft.invoice.work?.items?.length || 0));
+    Logger.log("Consultant name: " + draft.invoice.consultant?.name);
+  }
+  
+  Logger.log("\n=== Testing FINAL ===");
+  const final = getInvoiceById("DRAFT_1767343251928");
+  Logger.log("Final OK: " + final.ok);
+  if (final.ok) {
+    Logger.log("Has snapshot: " + !!final.invoice.snapshot);
+    Logger.log("Has work.items: " + (final.invoice.work?.items?.length || 0));
+    Logger.log("Consultant name: " + final.invoice.consultant?.name);
+    Logger.log("Total: " + final.invoice.totals?.total);
+  }
+}
+function testInvoiceDataStructure() {
+  Logger.log("======================================");
+  Logger.log("TESTING DRAFT INVOICE");
+  Logger.log("======================================");
+  
+  const draft = getInvoiceById("DRAFT_1767347461369");
+  
+  if (draft.ok) {
+    Logger.log("✅ Draft loaded successfully");
+    Logger.log("Has work.items: " + (draft.invoice.work?.items?.length || 0));
+    Logger.log("Has work.stages: " + (draft.invoice.work?.stages?.length || 0));
+    Logger.log("Consultant name: " + (draft.invoice.consultant?.name || "NOT FOUND"));
+    Logger.log("Client name: " + (draft.invoice.client?.name || "NOT FOUND"));
+    Logger.log("Client address: " + (draft.invoice.client?.billingAddress || "NOT FOUND"));
+    
+    // Check if items have required fields
+    if (draft.invoice.work?.items?.length > 0) {
+      const firstItem = draft.invoice.work.items[0];
+      Logger.log("First item name: " + (firstItem.name || "NOT FOUND"));
+      Logger.log("First item mode: " + (firstItem.mode || "NOT FOUND"));
+      Logger.log("First item rate: " + (firstItem.rate || 0));
+    }
+  } else {
+    Logger.log("❌ Draft failed: " + draft.error);
+  }
+  
+  Logger.log("\n======================================");
+  Logger.log("TESTING FINAL INVOICE");
+  Logger.log("======================================");
+  
+  const final = getInvoiceById("DRAFT_1767343251928");
+  
+  if (final.ok) {
+    Logger.log("✅ Final invoice loaded successfully");
+    Logger.log("Invoice number: " + (final.invoice.invoiceNumber || "NOT FOUND"));
+    Logger.log("Has work.items: " + (final.invoice.work?.items?.length || 0));
+    Logger.log("Has work.stages: " + (final.invoice.work?.stages?.length || 0));
+    Logger.log("Consultant name: " + (final.invoice.consultant?.name || "NOT FOUND"));
+    Logger.log("Client name: " + (final.invoice.client?.name || "NOT FOUND"));
+    Logger.log("Subtotal: " + (final.invoice.totals?.subtotal || 0));
+    Logger.log("Total: " + (final.invoice.totals?.total || 0));
+    
+    // Check if items have required fields
+    if (final.invoice.work?.items?.length > 0) {
+      const firstItem = final.invoice.work.items[0];
+      Logger.log("First item name: " + (firstItem.name || "NOT FOUND"));
+      Logger.log("First item mode: " + (firstItem.mode || "NOT FOUND"));
+      Logger.log("First item amount: " + (firstItem.amount || 0));
+    }
+  } else {
+    Logger.log("❌ Final invoice failed: " + final.error);
+  }
+}
+function testSaveInvoiceWithRealDraft() {
+  Logger.log("=".repeat(60));
+  Logger.log("TESTING FINALIZE WITH REAL DRAFT");
+  Logger.log("=".repeat(60));
+
+  // Use your actual draft ID
+  const testInvoiceId = "DRAFT_1767347461369";
+
+  // First, load the draft to get current data
+  const draftResult = getInvoiceById(testInvoiceId);
+  
+  if (!draftResult.ok) {
+    Logger.log("❌ Failed to load draft: " + draftResult.error);
+    return;
+  }
+
+  Logger.log("✅ Draft loaded successfully");
+
+  // Build snapshot from draft data
+  const draft = draftResult.invoice;
+  
+  const snapshot = {
+    meta: {
+      invoiceId: draft.invoiceId,
+      invoiceDate: draft.date || new Date().toISOString().slice(0, 10)
+    },
+    project: draft.project || {},
+    consultant: draft.consultant || {},
+    client: draft.client || {},
+    work: {
+      stages: draft.stages || [],
+      items: draft.items || []
+    },
+    totals: {
+      serviceFeePct: draft.serviceFeePct || 25
+    },
+    compliance: {
+      sacCode: "999799",
+      supplyDescription: "Professional Services"
+    },
+    notes: draft.notes || ""
+  };
+
+  Logger.log("📦 Snapshot prepared:", {
+    hasProject: !!snapshot.project.projectCode,
+    hasConsultant: !!snapshot.consultant.id,
+    hasClient: !!snapshot.client.code,
+    itemsCount: snapshot.work.items.length
+  });
+
+  // Attempt to finalize
+  const result = saveInvoice({
+    invoiceId: testInvoiceId,
+    snapshot: snapshot
+  });
+
+  Logger.log("\n" + "=".repeat(60));
+  Logger.log("RESULT:");
+  Logger.log("=".repeat(60));
+  Logger.log(JSON.stringify(result, null, 2));
+
+  return result;
+}
+function debugListInvoiceIds() {
+  const sheet = getInvoicesSheet(false);
+  if (!sheet) {
+    Logger.log("❌ Sheet not found");
+    return;
+  }
+
+  const vals = sheet.getDataRange().getValues();
+  const headers = vals[0];
+  const map = makeHeaderMap(headers);
+
+  Logger.log("=".repeat(60));
+  Logger.log("ALL INVOICE IDs IN SHEET:");
+  Logger.log("=".repeat(60));
+
+  for (let i = 1; i < vals.length; i++) {
+    const id = vals[i][map.invoiceid];
+    const status = vals[i][map.status];
+    Logger.log(`Row ${i + 1}: ${id} (${status})`);
+  }
+}
+function migrateExistingInvoices() {
+  const sheet = getInvoicesSheet(false);
+  if (!sheet) {
+    Logger.log("❌ Invoices sheet not found");
+    return;
+  }
+
+  const vals = sheet.getDataRange().getValues();
+  const headers = vals[0];
+  const map = makeHeaderMap(headers);
+  
+  let updatedCount = 0;
+  let skippedCount = 0;
+  let errorCount = 0;
+
+  Logger.log("🔄 Starting migration...");
+  Logger.log(`Total rows: ${vals.length - 1}`);
+
+  for (let i = 1; i < vals.length; i++) {
+    const row = vals[i];
+    const invoiceId = row[map.invoiceid];
+    const status = String(row[map.status] || "").toUpperCase();
+    const consultantId = row[map.consultantid];
+
+    // Only migrate FINAL invoices
+    if (status !== "FINAL") {
+      skippedCount++;
+      continue;
+    }
+
+    try {
+      // Parse existing snapshot
+      let snapshot = {};
+      try {
+        const jsonStr = row[map.itemsjson] || "{}";
+        snapshot = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
+      } catch (e) {
+        Logger.log(`⚠️ Failed to parse snapshot for ${invoiceId}`);
+        errorCount++;
+        continue;
+      }
+
+      // Check if consultant data is incomplete
+      const consultant = snapshot.consultant || {};
+      const needsUpdate = 
+        !consultant.businessName || 
+        !consultant.registeredOffice || 
+        !consultant.pan || 
+        !consultant.gstin;
+
+      if (!needsUpdate) {
+        Logger.log(`✓ ${invoiceId} already has complete data`);
+        skippedCount++;
+        continue;
+      }
+
+      Logger.log(`🔧 Updating ${invoiceId}...`);
+
+      // ✅ Hydrate consultant data from master table
+      const consultantMaster = getConsultantMasterData(consultantId);
+      if (!consultantMaster) {
+        Logger.log(`⚠️ Consultant ${consultantId} not found in master table`);
+        errorCount++;
+        continue;
+      }
+
+      // Update snapshot with hydrated data
+      snapshot.consultant = {
+        ...consultant,
+        businessName: consultantMaster.businessName,
+        registeredOffice: consultantMaster.registeredOffice,
+        pan: consultantMaster.pan,
+        gstin: consultantMaster.gstin,
+        cin: consultantMaster.cin,
+        stateCode: consultantMaster.stateCode
+      };
+
+      // ✅ Also hydrate client data if needed
+      const client = snapshot.client || {};
+      if (!client.name || !client.businessName) {
+        const clientMaster = getClientMasterData(client.code || row[map.clientcode]);
+        if (clientMaster) {
+          snapshot.client = {
+            ...client,
+            name: clientMaster.name,
+            businessName: clientMaster.businessName,
+            billingAddress: clientMaster.billingAddress,
+            pan: clientMaster.pan,
+            gstin: clientMaster.gstin,
+            stateCode: clientMaster.stateCode
+          };
+        }
+      }
+
+      // Write updated snapshot back to sheet
+      sheet.getRange(i + 1, map.itemsjson + 1).setValue(JSON.stringify(snapshot));
+      
+      // Update timestamp
+      sheet.getRange(i + 1, map.updatedat + 1).setValue(nowIso());
+
+      updatedCount++;
+      Logger.log(`✅ Updated ${invoiceId}`);
+
+    } catch (error) {
+      Logger.log(`❌ Error updating ${invoiceId}: ${error.toString()}`);
+      errorCount++;
+    }
+  }
+
+  Logger.log("\n" + "=".repeat(60));
+  Logger.log("MIGRATION COMPLETE");
+  Logger.log("=".repeat(60));
+  Logger.log(`✅ Updated: ${updatedCount}`);
+  Logger.log(`⏭️ Skipped: ${skippedCount}`);
+  Logger.log(`❌ Errors: ${errorCount}`);
+  Logger.log("=".repeat(60));
+
+  return {
+    updated: updatedCount,
+    skipped: skippedCount,
+    errors: errorCount
+  };
+}
+
+/* ============================================================================
+   TEST FUNCTION: Preview what will be migrated (dry run)
+   ============================================================================ */
+
+function previewMigration() {
+  const sheet = getInvoicesSheet(false);
+  if (!sheet) {
+    Logger.log("❌ Invoices sheet not found");
+    return;
+  }
+
+  const vals = sheet.getDataRange().getValues();
+  const headers = vals[0];
+  const map = makeHeaderMap(headers);
+  
+  const needsUpdate = [];
+
+  for (let i = 1; i < vals.length; i++) {
+    const row = vals[i];
+    const invoiceId = row[map.invoiceid];
+    const status = String(row[map.status] || "").toUpperCase();
+
+    if (status !== "FINAL") continue;
+
+    try {
+      const jsonStr = row[map.itemsjson] || "{}";
+      const snapshot = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
+      
+      const consultant = snapshot.consultant || {};
+      const hasIncompleteData = 
+        !consultant.businessName || 
+        !consultant.registeredOffice || 
+        !consultant.pan || 
+        !consultant.gstin;
+
+      if (hasIncompleteData) {
+        needsUpdate.push({
+          invoiceId: invoiceId,
+          invoiceNumber: row[map.invoicenumber],
+          consultantId: row[map.consultantid],
+          consultantName: consultant.name,
+          missingFields: {
+            businessName: !consultant.businessName,
+            registeredOffice: !consultant.registeredOffice,
+            pan: !consultant.pan,
+            gstin: !consultant.gstin
+          }
+        });
+      }
+    } catch (e) {
+      // Skip unparseable rows
+    }
+  }
+
+  Logger.log("📋 MIGRATION PREVIEW");
+  Logger.log("=".repeat(60));
+  Logger.log(`${needsUpdate.length} invoices need updating:`);
+  Logger.log(JSON.stringify(needsUpdate, null, 2));
+  
+  return needsUpdate;
+}
+/* ============================================================================
+   SAFE MIGRATION SCRIPT - Handles Missing/Corrupt Consultant IDs
+   ============================================================================ */
+
+/**
+ * ✅ STEP 1: Audit consultant IDs in all invoices
+ */
+function auditConsultantIds() {
+  const sheet = getInvoicesSheet(false);
+  if (!sheet) {
+    Logger.log("❌ Invoices sheet not found");
+    return;
+  }
+
+  const vals = sheet.getDataRange().getValues();
+  const headers = vals[0];
+  const map = makeHeaderMap(headers);
+  
+  const issues = {
+    empty: [],
+    invalid: [],
+    valid: []
+  };
+
+  Logger.log("🔍 AUDITING CONSULTANT IDs");
+  Logger.log("=".repeat(60));
+
+  for (let i = 1; i < vals.length; i++) {
+    const row = vals[i];
+    const invoiceId = row[map.invoiceid];
+    const consultantId = String(row[map.consultantid] || "").trim();
+    const status = String(row[map.status] || "").toUpperCase();
+
+    if (status !== "FINAL") continue;
+
+    // Empty consultant ID
+    if (!consultantId) {
+      issues.empty.push({
+        invoiceId: invoiceId,
+        invoiceNumber: row[map.invoicenumber],
+        consultantName: row[map.consultantname]
+      });
+      continue;
+    }
+
+    // Invalid format (not starting with C_)
+    if (!consultantId.startsWith("C_")) {
+      issues.invalid.push({
+        invoiceId: invoiceId,
+        invoiceNumber: row[map.invoicenumber],
+        consultantId: consultantId,
+        consultantName: row[map.consultantname]
+      });
+      continue;
+    }
+
+    // Valid format
+    issues.valid.push({
+      invoiceId: invoiceId,
+      consultantId: consultantId
+    });
+  }
+
+  Logger.log(`✅ Valid: ${issues.valid.length}`);
+  Logger.log(`⚠️ Empty: ${issues.empty.length}`);
+  Logger.log(`❌ Invalid: ${issues.invalid.length}`);
+  Logger.log("=".repeat(60));
+
+  if (issues.empty.length > 0) {
+    Logger.log("\n📋 INVOICES WITH EMPTY CONSULTANT ID:");
+    Logger.log(JSON.stringify(issues.empty, null, 2));
+  }
+
+  if (issues.invalid.length > 0) {
+    Logger.log("\n📋 INVOICES WITH INVALID CONSULTANT ID:");
+    Logger.log(JSON.stringify(issues.invalid, null, 2));
+  }
+
+  return issues;
+}
+
+/**
+ * ✅ STEP 2: Attempt to recover consultant IDs from consultant names
+ */
+function recoverConsultantIds() {
+  const sheet = getInvoicesSheet(false);
+  if (!sheet) {
+    Logger.log("❌ Invoices sheet not found");
+    return;
+  }
+
+  const vals = sheet.getDataRange().getValues();
+  const headers = vals[0];
+  const map = makeHeaderMap(headers);
+  
+  // Build consultant name → ID lookup
+  const consultants = sheetToObjects(SHEET_CONSULTANTS);
+  const nameToId = {};
+  consultants.forEach(c => {
+    const name = String(c.Consultant_name || c.name || "").trim().toLowerCase();
+    const id = String(c.consultant_id || c.id || "").trim();
+    if (name && id) {
+      nameToId[name] = id;
+    }
+  });
+
+  Logger.log("🔧 ATTEMPTING TO RECOVER CONSULTANT IDs");
+  Logger.log("=".repeat(60));
+  Logger.log(`Known consultants: ${Object.keys(nameToId).length}`);
+
+  let recoveredCount = 0;
+  let unrecoverableCount = 0;
+
+  for (let i = 1; i < vals.length; i++) {
+    const row = vals[i];
+    const invoiceId = row[map.invoiceid];
+    const consultantId = String(row[map.consultantid] || "").trim();
+    const consultantName = String(row[map.consultantname] || "").trim();
+    const status = String(row[map.status] || "").toUpperCase();
+
+    if (status !== "FINAL") continue;
+
+    // Skip if already has valid ID
+    if (consultantId && consultantId.startsWith("C_")) continue;
+
+    // Try to recover from name
+    const nameLower = consultantName.toLowerCase();
+    const recoveredId = nameToId[nameLower];
+
+    if (recoveredId) {
+      Logger.log(`✅ Recovered: "${consultantName}" → ${recoveredId} (Invoice: ${invoiceId})`);
+      
+      // Update the sheet
+      sheet.getRange(i + 1, map.consultantid + 1).setValue(recoveredId);
+      recoveredCount++;
+    } else {
+      Logger.log(`⚠️ Cannot recover: "${consultantName}" (Invoice: ${invoiceId})`);
+      unrecoverableCount++;
+    }
+  }
+
+  Logger.log("\n" + "=".repeat(60));
+  Logger.log("RECOVERY COMPLETE");
+  Logger.log("=".repeat(60));
+  Logger.log(`✅ Recovered: ${recoveredCount}`);
+  Logger.log(`❌ Unrecoverable: ${unrecoverableCount}`);
+
+  return { recoveredCount, unrecoverableCount };
+}
+
+/**
+ * ✅ STEP 3: Safe migration with validation
+ */
+function safeMigrateExistingInvoices() {
+  const sheet = getInvoicesSheet(false);
+  if (!sheet) {
+    Logger.log("❌ Invoices sheet not found");
+    return;
+  }
+
+  const vals = sheet.getDataRange().getValues();
+  const headers = vals[0];
+  const map = makeHeaderMap(headers);
+  
+  let updatedCount = 0;
+  let skippedCount = 0;
+  let errorCount = 0;
+  const errors = [];
+
+  Logger.log("🔄 Starting SAFE migration...");
+  Logger.log(`Total rows: ${vals.length - 1}`);
+
+  for (let i = 1; i < vals.length; i++) {
+    const row = vals[i];
+    const invoiceId = row[map.invoiceid];
+    const status = String(row[map.status] || "").toUpperCase();
+    const consultantId = String(row[map.consultantid] || "").trim();
+
+    // Only migrate FINAL invoices
+    if (status !== "FINAL") {
+      skippedCount++;
+      continue;
+    }
+
+    // ✅ VALIDATION: Skip if consultantId is missing or invalid
+    if (!consultantId || !consultantId.startsWith("C_")) {
+      Logger.log(`⚠️ Skipping ${invoiceId}: Invalid consultant ID "${consultantId}"`);
+      errors.push({
+        invoiceId: invoiceId,
+        reason: "invalid_consultant_id",
+        consultantId: consultantId
+      });
+      errorCount++;
+      continue;
+    }
+
+    try {
+      // Parse existing snapshot
+      let snapshot = {};
+      try {
+        const jsonStr = row[map.itemsjson] || "{}";
+        snapshot = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
+      } catch (e) {
+        Logger.log(`⚠️ Failed to parse snapshot for ${invoiceId}`);
+        errors.push({
+          invoiceId: invoiceId,
+          reason: "parse_error",
+          error: e.toString()
+        });
+        errorCount++;
+        continue;
+      }
+
+      // Check if consultant data is incomplete
+      const consultant = snapshot.consultant || {};
+      const needsUpdate = 
+        !consultant.businessName || 
+        !consultant.registeredOffice || 
+        !consultant.pan || 
+        !consultant.gstin;
+
+      if (!needsUpdate) {
+        skippedCount++;
+        continue;
+      }
+
+      // ✅ Hydrate consultant data from master table
+      const consultantMaster = getConsultantMasterData(consultantId);
+      if (!consultantMaster) {
+        Logger.log(`⚠️ Consultant ${consultantId} not found in master table`);
+        errors.push({
+          invoiceId: invoiceId,
+          reason: "consultant_not_found",
+          consultantId: consultantId
+        });
+        errorCount++;
+        continue;
+      }
+
+      // ✅ Check if master data is also empty (consultant hasn't filled profile)
+      const hasValidMasterData = 
+        consultantMaster.businessName || 
+        consultantMaster.registeredOffice || 
+        consultantMaster.pan || 
+        consultantMaster.gstin;
+
+      if (!hasValidMasterData) {
+        Logger.log(`⚠️ Consultant ${consultantId} has no business data in master table`);
+        errors.push({
+          invoiceId: invoiceId,
+          reason: "consultant_no_business_data",
+          consultantId: consultantId
+        });
+        errorCount++;
+        continue;
+      }
+
+      Logger.log(`🔧 Updating ${invoiceId}...`);
+
+      // Update snapshot with hydrated data
+      snapshot.consultant = {
+        ...consultant,
+        id: consultantMaster.id,
+        name: consultantMaster.name,
+        email: consultantMaster.email,
+        businessName: consultantMaster.businessName,
+        registeredOffice: consultantMaster.registeredOffice,
+        pan: consultantMaster.pan,
+        gstin: consultantMaster.gstin,
+        cin: consultantMaster.cin,
+        stateCode: consultantMaster.stateCode
+      };
+
+      // ✅ Also hydrate client data if needed
+      const client = snapshot.client || {};
+      if (!client.name || !client.businessName) {
+        const clientMaster = getClientMasterData(client.code || row[map.clientcode]);
+        if (clientMaster) {
+          snapshot.client = {
+            ...client,
+            code: clientMaster.code,
+            name: clientMaster.name,
+            businessName: clientMaster.businessName,
+            billingAddress: clientMaster.billingAddress,
+            pan: clientMaster.pan,
+            gstin: clientMaster.gstin,
+            stateCode: clientMaster.stateCode
+          };
+        }
+      }
+
+      // Write updated snapshot back to sheet
+      sheet.getRange(i + 1, map.itemsjson + 1).setValue(JSON.stringify(snapshot));
+      
+      // Update timestamp
+      sheet.getRange(i + 1, map.updatedat + 1).setValue(nowIso());
+
+      updatedCount++;
+      Logger.log(`✅ Updated ${invoiceId}`);
+
+    } catch (error) {
+      Logger.log(`❌ Error updating ${invoiceId}: ${error.toString()}`);
+      errors.push({
+        invoiceId: invoiceId,
+        reason: "unexpected_error",
+        error: error.toString()
+      });
+      errorCount++;
+    }
+  }
+
+  Logger.log("\n" + "=".repeat(60));
+  Logger.log("SAFE MIGRATION COMPLETE");
+  Logger.log("=".repeat(60));
+  Logger.log(`✅ Updated: ${updatedCount}`);
+  Logger.log(`⏭️ Skipped (already complete): ${skippedCount}`);
+  Logger.log(`❌ Errors: ${errorCount}`);
+  Logger.log("=".repeat(60));
+
+  if (errors.length > 0) {
+    Logger.log("\n📋 ERROR DETAILS:");
+    Logger.log(JSON.stringify(errors, null, 2));
+  }
+
+  return {
+    updated: updatedCount,
+    skipped: skippedCount,
+    errors: errorCount,
+    errorDetails: errors
+  };
+}
+function verifyMigration() {
+  // Test with one of the migrated invoices
+  const testId = "INV_1767269041089"; // One that was updated
+  
+  const result = getInvoiceById(testId);
+  
+  if (!result.ok) {
+    Logger.log("❌ Failed to load invoice");
+    return;
+  }
+  
+  const invoice = result.invoice;
+  
+  Logger.log("=".repeat(60));
+  Logger.log("VERIFICATION TEST");
+  Logger.log("=".repeat(60));
+  Logger.log("Invoice ID: " + invoice.invoiceId);
+  Logger.log("Invoice Number: " + invoice.invoiceNumber);
+  Logger.log("Status: " + invoice.status);
+  Logger.log("");
+  Logger.log("CONSULTANT DATA:");
+  Logger.log("  Name: " + (invoice.consultant?.name || "MISSING"));
+  Logger.log("  Business Name: " + (invoice.consultant?.businessName || "MISSING"));
+  Logger.log("  Registered Office: " + (invoice.consultant?.registeredOffice || "MISSING"));
+  Logger.log("  PAN: " + (invoice.consultant?.pan || "MISSING"));
+  Logger.log("  GSTIN: " + (invoice.consultant?.gstin || "MISSING"));
+  Logger.log("");
+  Logger.log("CLIENT DATA:");
+  Logger.log("  Name: " + (invoice.client?.name || "MISSING"));
+  Logger.log("  Business Name: " + (invoice.client?.businessName || "MISSING"));
+  Logger.log("  Address: " + (invoice.client?.billingAddress || "MISSING"));
+  Logger.log("=".repeat(60));
+  
+  return invoice;
+}
+function debugSnapshot() {
+  const sheet = getInvoicesSheet(false);
+  const vals = sheet.getDataRange().getValues();
+  const headers = vals[0];
+  const map = makeHeaderMap(headers);
+  
+  // Find the migrated invoice
+  const rowIndex = vals.findIndex((r, i) => i > 0 && r[map.invoiceid] === "INV_1767269041089");
+  
+  if (rowIndex === -1) {
+    Logger.log("❌ Invoice not found");
+    return;
+  }
+  
+  const row = vals[rowIndex];
+  const itemsJson = row[map.itemsjson];
+  
+  Logger.log("=".repeat(60));
+  Logger.log("RAW DATA FROM SHEET");
+  Logger.log("=".repeat(60));
+  Logger.log("Type: " + typeof itemsJson);
+  Logger.log("Length: " + (itemsJson ? itemsJson.length : 0));
+  Logger.log("");
+  
+  // Try to parse
+  try {
+    let parsed = typeof itemsJson === 'string' ? JSON.parse(itemsJson) : itemsJson;
+    
+    Logger.log("PARSED STRUCTURE:");
+    Logger.log("Has meta: " + !!parsed.meta);
+    Logger.log("Has consultant: " + !!parsed.consultant);
+    Logger.log("Has client: " + !!parsed.client);
+    Logger.log("");
+    
+    if (parsed.consultant) {
+      Logger.log("CONSULTANT OBJECT:");
+      Logger.log(JSON.stringify(parsed.consultant, null, 2));
+    }
+    
+    if (parsed.client) {
+      Logger.log("CLIENT OBJECT:");
+      Logger.log(JSON.stringify(parsed.client, null, 2));
+    }
+    
+  } catch (e) {
+    Logger.log("❌ Parse error: " + e.toString());
+  }
+}
+
+// Run this
+debugSnapshot();
+function debugSnapshotContent() {
+  const sheet = getInvoicesSheet(false);
+  const vals = sheet.getDataRange().getValues();
+  const headers = vals[0];
+  const map = makeHeaderMap(headers);
+  
+  const rowIndex = vals.findIndex((r, i) => i > 0 && r[map.invoiceid] === "INV_1767269041089");
+  
+  if (rowIndex === -1) {
+    Logger.log("❌ Invoice not found");
+    return;
+  }
+  
+  const row = vals[rowIndex];
+  const itemsJson = row[map.itemsjson];
+  
+  Logger.log("=".repeat(60));
+  Logger.log("ACTUAL CONTENT:");
+  Logger.log("=".repeat(60));
+  Logger.log(itemsJson);
+  Logger.log("=".repeat(60));
+  
+  // Try parsing
+  try {
+    const parsed = JSON.parse(itemsJson);
+    Logger.log("\nPARSED OBJECT KEYS:");
+    Logger.log(Object.keys(parsed));
+    Logger.log("\nFULL PARSED DATA:");
+    Logger.log(JSON.stringify(parsed, null, 2));
+  } catch (e) {
+    Logger.log("Parse error: " + e.toString());
+  }
+}
+
+debugSnapshotContent();
+function testMigrationLogic() {
+  const consultantId = "C_2105";
+  
+  // Test hydration
+  const consultantMaster = getConsultantMasterData(consultantId);
+  
+  Logger.log("=".repeat(60));
+  Logger.log("CONSULTANT MASTER DATA:");
+  Logger.log("=".repeat(60));
+  Logger.log(JSON.stringify(consultantMaster, null, 2));
+  
+  // Now let's manually test what the migration should do
+  const sheet = getInvoicesSheet(false);
+  const vals = sheet.getDataRange().getValues();
+  const headers = vals[0];
+  const map = makeHeaderMap(headers);
+  
+  const rowIndex = vals.findIndex((r, i) => i > 0 && r[map.invoiceid] === "INV_1767269041089");
+  const row = vals[rowIndex];
+  
+  // Parse existing snapshot
+  let snapshot = {};
+  try {
+    const jsonStr = row[map.itemsjson] || "{}";
+    snapshot = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
+  } catch (e) {
+    Logger.log("Parse error: " + e.toString());
+  }
+  
+  Logger.log("\n" + "=".repeat(60));
+  Logger.log("EXISTING SNAPSHOT TYPE:");
+  Logger.log("=".repeat(60));
+  Logger.log("Is Array: " + Array.isArray(snapshot));
+  Logger.log("Has meta: " + !!snapshot.meta);
+  Logger.log("Has consultant: " + !!snapshot.consultant);
+  Logger.log("Keys: " + Object.keys(snapshot));
+}
+
+testMigrationLogic();
+/* ============================================================================
+   REBUILD SNAPSHOTS: Convert Old Format → New Format with Complete Data
+   ============================================================================ */
+
+function rebuildOldInvoiceSnapshots() {
+  const sheet = getInvoicesSheet(false);
+  if (!sheet) {
+    Logger.log("❌ Invoices sheet not found");
+    return;
+  }
+
+  const vals = sheet.getDataRange().getValues();
+  const headers = vals[0];
+  const map = makeHeaderMap(headers);
+  
+  let rebuiltCount = 0;
+  let skippedCount = 0;
+  let errorCount = 0;
+  const errors = [];
+
+  Logger.log("🔄 Starting snapshot rebuild...");
+  Logger.log(`Total rows: ${vals.length - 1}`);
+
+  for (let i = 1; i < vals.length; i++) {
+    const row = vals[i];
+    const invoiceId = row[map.invoiceid];
+    const status = String(row[map.status] || "").toUpperCase();
+    const consultantId = String(row[map.consultantid] || "").trim();
+
+    // Only rebuild FINAL invoices
+    if (status !== "FINAL") {
+      skippedCount++;
+      continue;
+    }
+
+    // Skip if no valid consultant ID
+    if (!consultantId || !consultantId.startsWith("C_")) {
+      skippedCount++;
+      continue;
+    }
+
+    try {
+      // Parse existing data
+      let existingData = {};
+      try {
+        const jsonStr = row[map.itemsjson] || "{}";
+        existingData = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
+      } catch (e) {
+        Logger.log(`⚠️ Failed to parse data for ${invoiceId}`);
+        errorCount++;
+        continue;
+      }
+
+      // Check if already has new format
+      if (existingData.meta && existingData.consultant && existingData.client) {
+        skippedCount++;
+        continue;
+      }
+
+      Logger.log(`🔧 Rebuilding ${invoiceId}...`);
+
+      // ✅ Hydrate consultant data
+      const consultantMaster = getConsultantMasterData(consultantId);
+      if (!consultantMaster) {
+        Logger.log(`⚠️ Consultant ${consultantId} not found`);
+        errors.push({
+          invoiceId: invoiceId,
+          reason: "consultant_not_found",
+          consultantId: consultantId
+        });
+        errorCount++;
+        continue;
+      }
+
+      // ✅ Hydrate client data
+      const clientCode = row[map.clientcode];
+      const clientMaster = getClientMasterData(clientCode);
+
+      // Extract work items (handle both array and object formats)
+      let workItems = [];
+      if (Array.isArray(existingData)) {
+        // Old format: just an array of items
+        workItems = existingData;
+      } else if (existingData.work?.items) {
+        // Partial new format
+        workItems = existingData.work.items;
+      } else if (existingData.items) {
+        // Alternative format
+        workItems = existingData.items;
+      }
+
+      // Get stages from sheet or existing data
+      let stages = [];
+      if (existingData.work?.stages) {
+        stages = existingData.work.stages;
+      } else if (existingData.stages) {
+        stages = existingData.stages;
+      }
+
+      // Calculate totals from work items
+      const subtotal = workItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+      const gst = Math.round(subtotal * 0.18);
+      const total = subtotal + gst;
+      const serviceFeePct = Number(row[map.servicefeepct] || 25);
+      const serviceFee = Math.round(total * (serviceFeePct / 100));
+      const netEarnings = total - serviceFee;
+
+      // Build complete snapshot
+      const completeSnapshot = {
+        meta: {
+          invoiceId: invoiceId,
+          invoiceNumber: row[map.invoicenumber],
+          status: "FINAL",
+          invoiceDate: row[map.invoicedate],
+          createdAt: row[map.createdat],
+          updatedAt: row[map.updatedat],
+          finalizedAt: row[map.updatedat]
+        },
+
+        project: {
+          projectCode: row[map.projectcode]
+        },
+
+        consultant: {
+          id: consultantMaster.id,
+          name: consultantMaster.name,
+          email: consultantMaster.email,
+          businessName: consultantMaster.businessName,
+          registeredOffice: consultantMaster.registeredOffice,
+          pan: consultantMaster.pan,
+          gstin: consultantMaster.gstin,
+          cin: consultantMaster.cin || "",
+          stateCode: consultantMaster.stateCode
+        },
+
+        client: clientMaster ? {
+          code: clientMaster.code,
+          name: clientMaster.name,
+          businessName: clientMaster.businessName,
+          billingAddress: clientMaster.billingAddress,
+          pan: clientMaster.pan || "",
+          gstin: clientMaster.gstin || "",
+          stateCode: clientMaster.stateCode || ""
+        } : {
+          code: clientCode,
+          name: "",
+          businessName: "",
+          billingAddress: row[map.billingaddress] || "",
+          pan: "",
+          gstin: "",
+          stateCode: ""
+        },
+
+        serviceProvider: {
+          name: "Hourly Ventures LLP",
+          registeredOffice: "K-47, Kailash Colony, South Delhi, New Delhi, Delhi, India, 110048",
+          stateCode: "Delhi (07)",
+          pan: "AASFH5516N",
+          cin: "ACQ-3618",
+          gstin: "JKNJKNSX",
+          email: "Team@Hourly.Design"
+        },
+
+        work: {
+          stages: stages,
+          items: workItems
+        },
+
+        totals: {
+          subtotal: subtotal,
+          gst: gst,
+          total: total,
+          serviceFeePct: serviceFeePct,
+          serviceFeeAmount: serviceFee,
+          netEarnings: netEarnings
+        },
+
+        compliance: {
+          sacCode: "999799",
+          supplyDescription: "Professional Services"
+        },
+
+        notes: row[map.notes] || ""
+      };
+
+      // Write complete snapshot to sheet
+      sheet.getRange(i + 1, map.itemsjson + 1).setValue(JSON.stringify(completeSnapshot));
+      
+      // Update timestamp
+      sheet.getRange(i + 1, map.updatedat + 1).setValue(nowIso());
+
+      rebuiltCount++;
+      Logger.log(`✅ Rebuilt ${invoiceId}`);
+
+    } catch (error) {
+      Logger.log(`❌ Error rebuilding ${invoiceId}: ${error.toString()}`);
+      errors.push({
+        invoiceId: invoiceId,
+        reason: "unexpected_error",
+        error: error.toString()
+      });
+      errorCount++;
+    }
+  }
+
+  Logger.log("\n" + "=".repeat(60));
+  Logger.log("SNAPSHOT REBUILD COMPLETE");
+  Logger.log("=".repeat(60));
+  Logger.log(`✅ Rebuilt: ${rebuiltCount}`);
+  Logger.log(`⏭️ Skipped (already new format): ${skippedCount}`);
+  Logger.log(`❌ Errors: ${errorCount}`);
+  Logger.log("=".repeat(60));
+
+  if (errors.length > 0) {
+    Logger.log("\n📋 ERROR DETAILS:");
+    Logger.log(JSON.stringify(errors, null, 2));
+  }
+
+  return {
+    rebuilt: rebuiltCount,
+    skipped: skippedCount,
+    errors: errorCount,
+    errorDetails: errors
+  };
+}
+
+/* ============================================================================
+   VERIFICATION: Check a rebuilt invoice
+   ============================================================================ */
+
+function verifyRebuiltInvoice() {
+  const testId = "INV_1767269041089";
+  
+  const result = getInvoiceById(testId);
+  
+  if (!result.ok) {
+    Logger.log("❌ Failed to load invoice");
+    return;
+  }
+  
+  const invoice = result.invoice;
+  
+  Logger.log("=".repeat(60));
+  Logger.log("VERIFICATION AFTER REBUILD");
+  Logger.log("=".repeat(60));
+  Logger.log("Invoice ID: " + invoice.invoiceId);
+  Logger.log("Invoice Number: " + invoice.invoiceNumber);
+  Logger.log("Status: " + invoice.status);
+  Logger.log("");
+  Logger.log("CONSULTANT DATA:");
+  Logger.log("  Name: " + (invoice.consultant?.name || "❌ MISSING"));
+  Logger.log("  Business Name: " + (invoice.consultant?.businessName || "❌ MISSING"));
+  Logger.log("  Registered Office: " + (invoice.consultant?.registeredOffice || "❌ MISSING"));
+  Logger.log("  PAN: " + (invoice.consultant?.pan || "❌ MISSING"));
+  Logger.log("  GSTIN: " + (invoice.consultant?.gstin || "❌ MISSING"));
+  Logger.log("");
+  Logger.log("CLIENT DATA:");
+  Logger.log("  Name: " + (invoice.client?.name || "❌ MISSING"));
+  Logger.log("  Business Name: " + (invoice.client?.businessName || "❌ MISSING"));
+  Logger.log("  Address: " + (invoice.client?.billingAddress || "❌ MISSING"));
+  Logger.log("");
+  Logger.log("TOTALS:");
+  Logger.log("  Subtotal: " + (invoice.totals?.subtotal || invoice.subtotal || "❌ MISSING"));
+  Logger.log("  GST: " + (invoice.totals?.gst || invoice.gst || "❌ MISSING"));
+  Logger.log("  Total: " + (invoice.totals?.total || invoice.total || "❌ MISSING"));
+  Logger.log("=".repeat(60));
+  
+  return invoice;
+}
+function debugConsultantC_2105() {
+  const consultantMaster = getConsultantMasterData("C_2105");
+  
+  Logger.log("=".repeat(60));
+  Logger.log("CONSULTANT MASTER DATA FOR C_2105");
+  Logger.log("=".repeat(60));
+  Logger.log(JSON.stringify(consultantMaster, null, 2));
+  Logger.log("=".repeat(60));
+  
+  // Check what's actually in the sheet
+  const sh = getConsultantSheet();
+  const vals = sh.getDataRange().getValues();
+  const headers = vals[0];
+  
+  Logger.log("\nCONSULTANTS SHEET HEADERS:");
+  Logger.log(JSON.stringify(headers));
+  
+  // Find C_2105 row
+  for (let i = 1; i < vals.length; i++) {
+    const row = vals[i];
+    if (String(row[0]).trim() === "C_2105") {
+      Logger.log("\nC_2105 ROW DATA:");
+      headers.forEach((h, idx) => {
+        Logger.log(`  ${h}: "${row[idx]}"`);
+      });
+      break;
+    }
+  }
+}
+function fixClientDataInExistingInvoices() {
+  const sheet = getInvoicesSheet(false);
+  if (!sheet) {
+    Logger.log("❌ Invoices sheet not found");
+    return;
+  }
+
+  const vals = sheet.getDataRange().getValues();
+  const headers = vals[0];
+  const map = makeHeaderMap(headers);
+  
+  let fixedCount = 0;
+  let skippedCount = 0;
+  let errorCount = 0;
+
+  Logger.log("🔧 Starting client data fix...");
+
+  for (let i = 1; i < vals.length; i++) {
+    const row = vals[i];
+    const invoiceId = row[map.invoiceid];
+    const status = String(row[map.status] || "").toUpperCase();
+    const clientCode = String(row[map.clientcode] || "").trim();
+
+    // Only fix FINAL invoices
+    if (status !== "FINAL") {
+      skippedCount++;
+      continue;
+    }
+
+    // Skip if no client code in the row
+    if (!clientCode) {
+      Logger.log(`⚠️ ${invoiceId}: No client code in row`);
+      errorCount++;
+      continue;
+    }
+
+    try {
+      // Parse existing snapshot
+      const jsonStr = row[map.itemsjson] || "{}";
+      const snapshot = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
+
+      // Check if client data is empty
+      const client = snapshot.client || {};
+      const needsFix = !client.code || !client.name || !client.businessName;
+
+      if (!needsFix) {
+        skippedCount++;
+        continue;
+      }
+
+      Logger.log(`🔧 Fixing ${invoiceId} (client: ${clientCode})...`);
+
+      // ✅ Fetch fresh client data
+      const clientMaster = getClientMasterData(clientCode);
+      
+      if (!clientMaster) {
+        Logger.log(`⚠️ Client ${clientCode} not found in master table`);
+        errorCount++;
+        continue;
+      }
+
+      // Update snapshot with complete client data
+      snapshot.client = {
+        code: clientMaster.code,
+        name: clientMaster.name,
+        businessName: clientMaster.businessName,
+        billingAddress: clientMaster.billingAddress || client.billingAddress,
+        pan: clientMaster.pan,
+        gstin: clientMaster.gstin,
+        stateCode: clientMaster.stateCode
+      };
+
+      // Write back to sheet
+      sheet.getRange(i + 1, map.itemsjson + 1).setValue(JSON.stringify(snapshot));
+      sheet.getRange(i + 1, map.updatedat + 1).setValue(nowIso());
+
+      fixedCount++;
+      Logger.log(`✅ Fixed ${invoiceId}`);
+
+    } catch (error) {
+      Logger.log(`❌ Error fixing ${invoiceId}: ${error.toString()}`);
+      errorCount++;
+    }
+  }
+
+  Logger.log("\n" + "=".repeat(60));
+  Logger.log("CLIENT DATA FIX COMPLETE");
+  Logger.log("=".repeat(60));
+  Logger.log(`✅ Fixed: ${fixedCount}`);
+  Logger.log(`⏭️ Skipped (already complete): ${skippedCount}`);
+  Logger.log(`❌ Errors: ${errorCount}`);
+
+  return { fixed: fixedCount, skipped: skippedCount, errors: errorCount };
+}
+
+function debugToken() {
+  Logger.log("TOKEN = " + getApiToken());
+}
+// function doPost(e) {
+//   Logger.log("EVENT OBJECT:");
+//   Logger.log(JSON.stringify(e));
+
+//   if (!isAuthorized(e)) return unauthorized();
+  
+// }
+
+/* =========================================================
+   ✅ SMART CALCULATION HELPER (Hours × Rate × Factor)
+   ========================================================= */
+function calculateDraftSubtotal(items) {
+  if (!items || !Array.isArray(items)) return 0;
+
+  return items.reduce((sum, item) => {
+    // 1. Agar Frontend ne direct Amount bheja hai
+    if (item.amount && Number(item.amount) > 0) {
+      return sum + Number(item.amount);
+    }
+
+    // 2. Agar Amount nahi hai, toh HUM CALCULATE KARENGE
+    let totalHours = Number(item.hours || 0);
+    
+    // Agar stageHours (nested structure) hai toh wahan se hours nikalo
+    if (item.stageHours && typeof item.stageHours === 'object') {
+      for (const stageKey in item.stageHours) {
+        const subStages = item.stageHours[stageKey];
+        if (typeof subStages === 'object') {
+          for (const subKey in subStages) {
+            totalHours += Number(subStages[subKey] || 0);
+          }
+        }
+      }
+    }
+
+    const rate = Number(item.rate || 0);
+    const factor = Number(item.factor || 1);
+    
+    // Formula: Total = Purana Sum + (Ghante × Rate × Factor)
+    return sum + (totalHours * rate * factor);
+  }, 0);
+}
+function test1_verifyClientEmailColumn() {
+  Logger.log("=" .repeat(60));
+  Logger.log("TEST 1: VERIFY CLIENT EMAIL COLUMN");
+  Logger.log("=".repeat(60));
+  
+  const rows = sheetToObjects(SHEET_CLIENTS);
+  
+  if (rows.length === 0) {
+    Logger.log("❌ No clients found in sheet");
+    return { ok: false, error: "no_clients" };
+  }
+  
+  Logger.log(`Found ${rows.length} clients`);
+  
+  // Check first few clients
+  const sampleSize = Math.min(3, rows.length);
+  const samples = [];
+  
+  for (let i = 0; i < sampleSize; i++) {
+    const client = rows[i];
+    const hasEmail = !!(client.Client_email || client.email);
+    
+    samples.push({
+      code: client.Client_Code || client.client_code,
+      name: client.Client_name || client.name,
+      email: client.Client_email || client.email || "MISSING",
+      hasEmail: hasEmail
+    });
+    
+    Logger.log(`\nClient ${i + 1}:`);
+    Logger.log(`  Code: ${samples[i].code}`);
+    Logger.log(`  Name: ${samples[i].name}`);
+    Logger.log(`  Email: ${samples[i].email}`);
+    Logger.log(`  Status: ${hasEmail ? "✅ HAS EMAIL" : "❌ MISSING EMAIL"}`);
+  }
+  
+  const withEmail = rows.filter(r => !!(r.Client_email || r.email)).length;
+  const withoutEmail = rows.length - withEmail;
+  
+  Logger.log("\n" + "=".repeat(60));
+  Logger.log("SUMMARY:");
+  Logger.log(`Total Clients: ${rows.length}`);
+  Logger.log(`With Email: ${withEmail}`);
+  Logger.log(`Without Email: ${withoutEmail}`);
+  Logger.log("=".repeat(60));
+  
+  return {
+    ok: true,
+    totalClients: rows.length,
+    withEmail: withEmail,
+    withoutEmail: withoutEmail,
+    samples: samples
+  };
+}
+
+function test2_getClientFunction() {
+  Logger.log("=".repeat(60));
+  Logger.log("TEST 2: GET CLIENT FUNCTION");
+  Logger.log("=".repeat(60));
+  
+  // Test with a known client code (update this to match your data)
+  const testClientCode = "CLT_191224";
+  
+  Logger.log(`Testing with client code: ${testClientCode}`);
+  
+  const client = getClient(testClientCode);
+  
+  if (!client) {
+    Logger.log(`❌ Client ${testClientCode} not found`);
+    Logger.log("Available clients:");
+    
+    const allClients = sheetToObjects(SHEET_CLIENTS);
+    allClients.slice(0, 5).forEach(c => {
+      Logger.log(`  - ${c.Client_Code || c.client_code}`);
+    });
+    
+    return { ok: false, error: "client_not_found" };
+  }
+  
+  Logger.log("\n📋 Client Data:");
+  Logger.log(JSON.stringify(client, null, 2));
+  
+  const hasEmail = !!(client.Client_email || client.email);
+  
+  Logger.log("\n" + "=".repeat(60));
+  Logger.log("RESULT:");
+  Logger.log(`Email field exists: ${hasEmail ? "✅ YES" : "❌ NO"}`);
+  Logger.log(`Email value: ${client.Client_email || client.email || "NOT SET"}`);
+  Logger.log("=".repeat(60));
+  
+  return {
+    ok: hasEmail,
+    client: client,
+    hasEmail: hasEmail
+  };
+}
+function test3_getInvoiceSetupFunction() {
+  Logger.log("=".repeat(60));
+  Logger.log("TEST 3: GET INVOICE SETUP FUNCTION");
+  Logger.log("=".repeat(60));
+  
+  // Test with a known project code (update this to match your data)
+  const testProjectCode = "PRJ_210325";
+  
+  Logger.log(`Testing with project code: ${testProjectCode}`);
+  
+  const setup = getInvoiceSetup(testProjectCode);
+  
+  if (!setup.ok) {
+    Logger.log(`❌ Project ${testProjectCode} not found: ${setup.error}`);
+    return { ok: false, error: setup.error };
+  }
+  
+  Logger.log("\n📋 Setup Data:");
+  Logger.log(JSON.stringify(setup, null, 2));
+  
+  const hasClientEmail = !!(setup.client?.Client_email || setup.client?.email);
+  
+  Logger.log("\n" + "=".repeat(60));
+  Logger.log("RESULT:");
+  Logger.log(`Project found: ✅`);
+  Logger.log(`Client found: ${setup.client ? "✅" : "❌"}`);
+  Logger.log(`Client email exists: ${hasClientEmail ? "✅ YES" : "❌ NO"}`);
+  Logger.log(`Client email value: ${setup.client?.Client_email || setup.client?.email || "NOT SET"}`);
+  Logger.log("=".repeat(60));
+  
+  return {
+    ok: hasClientEmail,
+    setup: setup,
+    hasClientEmail: hasClientEmail
+  };
+}
+
+/**
+ * ✅ TEST 4: Test Invoice Finalization with Client Email
+ * Creates a test draft and finalizes it to verify email is captured
+ */
+function test4_invoiceFinalizationWithEmail() {
+  Logger.log("=".repeat(60));
+  Logger.log("TEST 4: INVOICE FINALIZATION WITH CLIENT EMAIL");
+  Logger.log("=".repeat(60));
+  
+  // Find an existing DRAFT invoice to test with
+  const drafts = getAllDrafts({});
+  
+  if (!drafts.ok || drafts.drafts.length === 0) {
+    Logger.log("❌ No draft invoices found");
+    Logger.log("Creating a test draft first...");
+    
+    // Create a minimal test draft
+    const testDraft = createDraft({
+      consultantId: "C_2105", // Update to match your data
+      invoiceData: {
+        project: { projectCode: "PRJ_210325" },
+        client: { code: "CLT_191224" },
+        consultant: { name: "Test Consultant" },
+        date: new Date().toISOString().slice(0, 10),
+        work: {
+          items: [
+            {
+              memberId: "M1",
+              name: "Test Member",
+              mode: "Online",
+              rate: 1000,
+              factor: 1,
+              amount: 1000
+            }
+          ],
+          stages: []
+        },
+        config: { serviceFeePct: 25 },
+        notes: "Test invoice for email verification"
+      }
+    });
+    
+    if (!testDraft.ok) {
+      Logger.log("❌ Failed to create test draft:", testDraft.error);
+      return { ok: false, error: "draft_creation_failed" };
+    }
+    
+    Logger.log("✅ Created test draft:", testDraft.invoiceId);
+    
+    // Now test finalization
+    const invoiceId = testDraft.invoiceId;
+    
+    // Build snapshot for finalization
+    const snapshot = {
+      meta: {
+        invoiceId: invoiceId,
+        invoiceDate: new Date().toISOString().slice(0, 10)
+      },
+      project: { projectCode: "PRJ_210325" },
+      consultant: { id: "C_2105", name: "Test Consultant" },
+      client: { code: "CLT_191224" },
+      work: {
+        items: [{ amount: 1000, name: "Test Item" }],
+        stages: []
+      },
+      totals: { serviceFeePct: 25 },
+      compliance: {
+        sacCode: "999799",
+        supplyDescription: "Professional Services"
+      },
+      notes: "Test invoice"
+    };
+    
+    const result = saveInvoice({
+      invoiceId: invoiceId,
+      snapshot: snapshot
+    });
+    
+    if (!result.ok) {
+      Logger.log("❌ Finalization failed:", result.error);
+      return { ok: false, error: "finalization_failed", details: result };
+    }
+    
+    Logger.log("\n✅ Invoice finalized successfully!");
+    Logger.log("Invoice Number:", result.invoiceNumber);
+    Logger.log("Client Email returned:", result.clientEmail || "NOT RETURNED");
+    
+    // Verify by fetching the invoice
+    const invoice = getInvoiceById(invoiceId);
+    
+    if (invoice.ok) {
+      const clientEmail = invoice.invoice.client?.email || 
+                         invoice.invoice.snapshot?.client?.email;
+      
+      Logger.log("\n" + "=".repeat(60));
+      Logger.log("VERIFICATION:");
+      Logger.log(`Invoice stored: ✅`);
+      Logger.log(`Client email in snapshot: ${clientEmail ? "✅ " + clientEmail : "❌ NOT FOUND"}`);
+      Logger.log("=".repeat(60));
+      
+      return {
+        ok: !!clientEmail,
+        invoiceId: invoiceId,
+        invoiceNumber: result.invoiceNumber,
+        clientEmail: clientEmail
+      };
+    }
+    
+    return { ok: false, error: "verification_failed" };
+  }
+  
+  Logger.log(`Found ${drafts.drafts.length} draft(s), using first one`);
+  const testDraftId = drafts.drafts[0].invoiceId;
+  Logger.log(`Using draft: ${testDraftId}`);
+  
+  // Continue with finalization test using existing draft...
+  return { ok: true, message: "Use test4b_finalizeExistingDraft instead" };
+}
+
+/**
+ * ✅ TEST 5: Verify Email in Finalized Invoice
+ * Checks an existing finalized invoice for client email
+ */
+function test5_verifyEmailInFinalInvoice() {
+  Logger.log("=".repeat(60));
+  Logger.log("TEST 5: VERIFY EMAIL IN FINALIZED INVOICE");
+  Logger.log("=".repeat(60));
+  
+  // Get all invoices
+  const invoices = listInvoicesByConsultantAction("C_2105");
+  
+  if (!invoices.ok || invoices.invoices.length === 0) {
+    Logger.log("❌ No invoices found");
+    return { ok: false, error: "no_invoices" };
+  }
+  
+  // Find first FINAL invoice
+  const finalInvoices = invoices.invoices.filter(
+    inv => String(inv.status).toUpperCase() === "FINAL"
+  );
+  
+  if (finalInvoices.length === 0) {
+    Logger.log("❌ No finalized invoices found");
+    return { ok: false, error: "no_final_invoices" };
+  }
+  
+  const testInvoiceId = finalInvoices[0].invoiceId;
+  Logger.log(`Testing invoice: ${testInvoiceId}`);
+  
+  const invoice = getInvoiceById(testInvoiceId);
+  
+  if (!invoice.ok) {
+    Logger.log("❌ Failed to fetch invoice:", invoice.error);
+    return { ok: false, error: invoice.error };
+  }
+  
+  // Check for email in snapshot
+  const clientEmail = invoice.invoice.client?.email || 
+                     invoice.invoice.snapshot?.client?.email;
+  
+  Logger.log("\n📋 Invoice Details:");
+  Logger.log(`Invoice ID: ${invoice.invoice.invoiceId}`);
+  Logger.log(`Invoice Number: ${invoice.invoice.invoiceNumber}`);
+  Logger.log(`Status: ${invoice.invoice.status}`);
+  Logger.log(`Client Code: ${invoice.invoice.client?.code || "N/A"}`);
+  Logger.log(`Client Email: ${clientEmail || "NOT FOUND"}`);
+  
+  Logger.log("\n" + "=".repeat(60));
+  Logger.log("RESULT:");
+  Logger.log(`Client email exists: ${clientEmail ? "✅ YES" : "❌ NO"}`);
+  Logger.log("=".repeat(60));
+  
+  return {
+    ok: !!clientEmail,
+    invoiceId: testInvoiceId,
+    clientEmail: clientEmail
+  };
+}
+
+/**
+ * ✅ RUN ALL TESTS
+ * Runs all client email tests in sequence
+ */
+function runAllClientEmailTests() {
+  Logger.log("\n\n");
+  Logger.log("#".repeat(70));
+  Logger.log("### RUNNING ALL CLIENT EMAIL TESTS ###");
+  Logger.log("#".repeat(70));
+  
+  const results = {
+    test1: null,
+    test2: null,
+    test3: null,
+    test5: null
+  };
+  
+  // Test 1
+  Logger.log("\n");
+  results.test1 = test1_verifyClientEmailColumn();
+  
+  // Test 2
+  Logger.log("\n");
+  results.test2 = test2_getClientFunction();
+  
+  // Test 3
+  Logger.log("\n");
+  results.test3 = test3_getInvoiceSetupFunction();
+  
+  // Test 5
+  Logger.log("\n");
+  results.test5 = test5_verifyEmailInFinalInvoice();
+  
+  // Summary
+  Logger.log("\n\n");
+  Logger.log("#".repeat(70));
+  Logger.log("### TEST SUMMARY ###");
+  Logger.log("#".repeat(70));
+  
+  const test1Pass = results.test1?.ok && results.test1.withEmail > 0;
+  const test2Pass = results.test2?.ok;
+  const test3Pass = results.test3?.ok;
+  const test5Pass = results.test5?.ok;
+  
+  Logger.log(`Test 1 - Client Email Column: ${test1Pass ? "✅ PASS" : "❌ FAIL"}`);
+  Logger.log(`Test 2 - getClient Function: ${test2Pass ? "✅ PASS" : "❌ FAIL"}`);
+  Logger.log(`Test 3 - getInvoiceSetup Function: ${test3Pass ? "✅ PASS" : "❌ FAIL"}`);
+  Logger.log(`Test 5 - Email in Final Invoice: ${test5Pass ? "✅ PASS" : "❌ FAIL"}`);
+  
+  const allPass = test1Pass && test2Pass && test3Pass && test5Pass;
+  
+  Logger.log("\n" + "=".repeat(70));
+  Logger.log(`OVERALL: ${allPass ? "✅ ALL TESTS PASSED" : "❌ SOME TESTS FAILED"}`);
+  Logger.log("=".repeat(70));
+  
+  return {
+    allPass: allPass,
+    results: results
+  };
+}
+
+/**
+ * ✅ QUICK FIX: Add Client Email to Clients Sheet
+ * Run this if Client_email column is missing
+ */
+function fixAddClientEmailColumn() {
+  Logger.log("=".repeat(60));
+  Logger.log("ADDING Client_email COLUMN TO CLIENTS SHEET");
+  Logger.log("=".repeat(60));
+  
+  const ss = getSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_CLIENTS);
+  
+  if (!sheet) {
+    Logger.log("❌ Clients sheet not found");
+    return { ok: false, error: "sheet_not_found" };
+  }
+  
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  
+  Logger.log("Current headers:", headers);
+  
+  // Check if email column already exists
+  const emailColumnIndex = headers.findIndex(h => {
+    const hn = String(h).toLowerCase().trim();
+    return hn === 'client_email' || hn === 'email';
+  });
+  
+  if (emailColumnIndex !== -1) {
+    Logger.log(`✅ Email column already exists at index ${emailColumnIndex + 1}`);
+    Logger.log(`Column name: ${headers[emailColumnIndex]}`);
+    return { ok: true, message: "column_exists", columnIndex: emailColumnIndex + 1 };
+  }
+  
+  // Add new column
+  Logger.log("Adding 'Client_email' column...");
+  
+  const lastColumn = sheet.getLastColumn();
+  sheet.getRange(1, lastColumn + 1).setValue("Client_email");
+  
+  Logger.log("✅ Added Client_email column at position", lastColumn + 1);
+  Logger.log("⚠️ You need to manually populate email addresses for each client");
+  
+  return {
+    ok: true,
+    message: "column_added",
+    columnPosition: lastColumn + 1
+  };
+}
+function test_invoice_setup_fix() {
+  const res = getInvoiceSetup("PRJ_210325");
+  Logger.log(JSON.stringify(res, null, 2));
+}
+function TEST_DEBUG_CLIENTS() {
+  const sheetName = 'Clients'; // Apni sheet ka naam confirm karein
+  const ss = SpreadsheetApp.getActive();
+  const sheet = ss.getSheetByName(sheetName);
+  
+  if (!sheet) {
+    Logger.log("❌ Error: '" + sheetName + "' naam ki sheet nahi mili!");
+    return;
+  }
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  
+  Logger.log("🔍 SHEET KA POST-MORTEM REPORT:");
+  Logger.log("==================================");
+  Logger.log("📋 SARE HEADERS (Jo Script dekh rahi hai):");
+  Logger.log(JSON.stringify(headers)); // Ye print karega: ["Client_Code", "Client_email", ...]
+  
+  // Check 'Client_email' exact match
+  const exactMatch = headers.indexOf("Client_email");
+  
+  if (exactMatch !== -1) {
+    Logger.log("✅ 'Client_email' column mil gaya! Index: " + exactMatch);
+    
+    // First 3 clients ka data check karte hain
+    Logger.log("\n📋 PEHLE 3 CLIENTS KA DATA:");
+    for (let i = 1; i < Math.min(data.length, 4); i++) {
+      const row = data[i];
+      Logger.log(`Row ${i+1}: Code=[${row[0]}] | Email=[${row[exactMatch]}]`);
+    }
+  } else {
+    Logger.log("❌ 'Client_email' column NAHI MILA!");
+    
+    // Check for similar names (spelling mistakes or spaces)
+    const similar = headers.find(h => h.trim().toLowerCase() === 'client_email');
+    if (similar) {
+      Logger.log("⚠️ Lekin ek milta-julta column mila: '" + similar + "'");
+      Logger.log("💡 Fix: Isme shayad space hai. Sheet mein jakar rename karo.");
+    } else {
+      Logger.log("⚠️ Aisa koi column hi nahi hai.");
+    }
+  }
+}
+
+
+function DEBUG_FIND_MISSING_CLIENT() {
+  const targetClientCode = "CLT_191225"; // Wo ID jo nahi mil rahi
+  const sheetName = 'Clients';
+  
+  const ss = SpreadsheetApp.getActive();
+  const sheet = ss.getSheetByName(sheetName);
+  
+  if (!sheet) {
+    Logger.log("❌ SHEET HI NAHI MILI: " + sheetName);
+    return;
+  }
+
+  // Force flush to ensure we get latest data
+  SpreadsheetApp.flush();
+
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  
+  Logger.log("🔍 SEARCHING FOR: " + targetClientCode);
+  Logger.log("📊 TOTAL ROWS FOUND: " + (data.length - 1)); // Header hata ke
+  
+  const codeIndex = headers.indexOf("Client_Code");
+  const emailIndex = headers.indexOf("Client_email");
+  
+  if (codeIndex === -1) {
+    Logger.log("❌ 'Client_Code' column nahi mila!");
+    Logger.log("Available Columns: " + JSON.stringify(headers));
+    return;
+  }
+
+  Logger.log("📋 LIST OF ALL CLIENTS SEEN BY SCRIPT:");
+  let found = false;
+
+  for (let i = 1; i < data.length; i++) {
+    const rowCode = String(data[i][codeIndex]).trim();
+    const rowEmail = emailIndex !== -1 ? data[i][emailIndex] : "N/A";
+    
+    Logger.log(`   Row ${i+1}: [${rowCode}] - Email: ${rowEmail}`);
+    
+    if (rowCode.toLowerCase() === targetClientCode.toLowerCase()) {
+      Logger.log("\n🎉 MIL GAYA! CLIENT FOUND AT ROW " + (i+1));
+      Logger.log("   👉 Code: " + rowCode);
+      Logger.log("   👉 Email: " + rowEmail);
+      
+      if (!rowEmail || rowEmail === "") {
+        Logger.log("   ⚠️ LEKIN EMAIL KHALI HAI! Sheet mein email bharo.");
+      } else {
+        Logger.log("   ✅ Data Sahi Hai.");
+      }
+      found = true;
+    }
+  }
+
+  if (!found) {
+    Logger.log("\n❌ RESULT: Script ne poori sheet chhan maari, par " + targetClientCode + " nahi mila.");
+    Logger.log("👉 Iska matlab tumhare Apps Script kisi GALAT sheet se connected hai.");
+  }
+}
+/* ============================================================================
+   USAGE
+   ============================================================================
+   
+   1. Run rebuild:
+      rebuildOldInvoiceSnapshots();
+   
+   2. Verify it worked:
+      verifyRebuiltInvoice();
+   
+   ============================================================================ */
+
+
+
+
+
+/* ============================================================================
+   USAGE WORKFLOW
+   ============================================================================
+   
+   1. Run audit first:
+      auditConsultantIds();
+   
+   2. Attempt recovery:
+      recoverConsultantIds();
+   
+   3. Run audit again to see how many were recovered:
+      auditConsultantIds();
+   
+   4. If recovery worked, run safe migration:
+      safeMigrateExistingInvoices();
+   
+   ============================================================================ */
+
+

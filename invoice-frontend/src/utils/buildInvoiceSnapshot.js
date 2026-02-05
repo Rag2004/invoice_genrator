@@ -14,6 +14,8 @@
  * ============================================================================
  */
 
+import { getStateWithCode } from './stateCodes';
+
 /**
  * Build a complete invoice snapshot from flat invoice state
  * 
@@ -21,9 +23,10 @@
  * @param {Object} projectData - Project details from API
  * @param {Object} clientData - Client details from API
  * @param {Object} consultantData - Consultant details from API
+ * @param {Object} companyDetails - Service Provider details from API (Added)
  * @returns {Object} Canonical snapshot
  */
-export function buildInvoiceSnapshot(invoice, projectData, clientData, consultantData) {
+export function buildInvoiceSnapshot(invoice, projectData, clientData, consultantData, companyDetails) {
   // ============================================================================
   // VALIDATION
   // ============================================================================
@@ -60,6 +63,23 @@ export function buildInvoiceSnapshot(invoice, projectData, clientData, consultan
   const firstItem = invoice.items?.[0];
   const hourlyRate = firstItem?.rate || invoice.baseHourlyRate || 0;
 
+  // Consultant variables
+  const consultantGstin =
+    consultantData?.business_gstin ||
+    consultantData?.gstin ||
+    '';
+
+  const consultantStateRaw =
+    consultantData?.business_state_code ||
+    consultantData?.stateCode ||
+    '';
+
+  // ✅ Format State with Code (Lookup by Name)
+  let consultantState = consultantStateRaw;
+  if (consultantState) {
+    consultantState = getStateWithCode(consultantState);
+  }
+
   const consultant = {
     id: invoice.consultantId || '',
     name: invoice.consultantName || consultantData?.Consultant_name || consultantData?.name || '',
@@ -78,23 +98,38 @@ export function buildInvoiceSnapshot(invoice, projectData, clientData, consultan
       consultantData?.business_pan ||
       consultantData?.pan ||
       '',
-    gstin:
-      consultantData?.business_gstin ||
-      consultantData?.gstin ||
-      '',
+    gstin: consultantGstin,
     cin:
       consultantData?.business_cin ||
       consultantData?.cin ||
       '',
-    stateCode:
-      consultantData?.business_state_code ||
-      consultantData?.stateCode ||
-      '',
+    stateCode: consultantState,
     hourlyRate: hourlyRate
   };
   // ============================================================================
   // CLIENT
   // ============================================================================
+  // CLIENT variables (calculated first for dependencies)
+  // ============================================================================
+  const clientGstin =
+    invoice.clientGstin ||
+    clientData?.Client_GST ||
+    clientData?.gstin ||
+    clientData?.GSTIN ||
+    '';
+
+  const clientStateRaw =
+    invoice.clientState ||
+    clientData?.State ||
+    clientData?.stateCode ||
+    '';
+
+  // ✅ Format State with Code (Lookup by Name)
+  let clientState = clientStateRaw;
+  if (clientState) {
+    clientState = getStateWithCode(clientState);
+  }
+
   const client = {
     code:
       invoice.clientCode ||
@@ -128,31 +163,34 @@ export function buildInvoiceSnapshot(invoice, projectData, clientData, consultan
       clientData?.PAN ||
       '',
 
-    gstin:
-      invoice.clientGstin ||
-      clientData?.Client_GST ||
-      clientData?.gstin ||
-      clientData?.GSTIN ||
-      '',
+    gstin: clientGstin,
 
-    stateCode:
-      invoice.clientState ||
-      clientData?.State ||
-      clientData?.stateCode ||
-      ''
+    stateCode: clientState
   };
 
+
   // ============================================================================
-  // SERVICE PROVIDER (HARDCODED CONSTANTS)
+  // SERVICE PROVIDER (DYNAMIC)
   // ============================================================================
+  // Service Provider Variables
+  const spGstin = companyDetails?.gstin || "JKNJKNSX";
+  const spStateRaw = companyDetails?.state_code || "Delhi (07)";
+
+  // ✅ Format State with Code (Lookup by Name)
+  let spState = spStateRaw;
+  if (spState) {
+    spState = getStateWithCode(spState);
+  }
+
   const serviceProvider = {
-    name: "Hourly Ventures LLP",
-    registeredOffice: "K-47, Kailash Colony, South Delhi, New Delhi, Delhi, India, 110048",
-    stateCode: "Delhi (07)",
-    pan: "AASFH5516N",
-    cin: "ACQ-3618",
-    gstin: "JKNJKNSX",
-    email: "Team@Hourly.Design"
+    name: companyDetails?.company_name || "Hourly Ventures LLP",
+    companyName: companyDetails?.company_name || "Hourly Ventures LLP", // ✅ For InvoiceComplete
+    registeredOffice: companyDetails?.registered_office || "K-47, Kailash Colony, South Delhi, New Delhi, Delhi, India, 110048",
+    stateCode: spState,
+    pan: companyDetails?.pan || "AASFH5516N",
+    cin: companyDetails?.cin || "ACQ-3618",
+    gstin: spGstin,
+    email: companyDetails?.email || "Team@Hourly.Design"
   };
 
   // ============================================================================
