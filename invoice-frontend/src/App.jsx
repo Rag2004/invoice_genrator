@@ -22,6 +22,9 @@ import InvoiceApp from './InvoiceApp';
 // ✅ ADD THIS: Create InvoiceViewerPage for final invoices
 import InvoiceViewerPage from './pages/InvoiceViewPage';
 
+import { ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
+
 import './styles/Dashboard.css';
 
 export default function App() {
@@ -41,48 +44,61 @@ export default function App() {
   }
 
   return (
-    <Routes>
-      {/* Auth Routes */}
-      <Route
-        path="/login"
-        element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <LoginPage />}
+    <>
+      <ToastContainer
+        position="bottom-right"
+        autoClose={3000}
+        hideProgressBar={false}
+        newestOnTop
+        closeOnClick
+        pauseOnFocusLoss={false}
+        draggable
+        pauseOnHover={false}
+        theme="light"
       />
-      <Route
-        path="/verify-otp"
-        element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <VerifyOTPPage />}
-      />
-      <Route
-        path="/setup-profile"
-        element={<ProtectedRoute><ProfileSetupPage /></ProtectedRoute>}
-      />
+      <Routes>
+        {/* Auth Routes */}
+        <Route
+          path="/login"
+          element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <LoginPage />}
+        />
+        <Route
+          path="/verify-otp"
+          element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <VerifyOTPPage />}
+        />
+        <Route
+          path="/setup-profile"
+          element={<ProtectedRoute><ProfileSetupPage /></ProtectedRoute>}
+        />
 
-      {/* Dashboard Routes */}
-      <Route
-        path="/dashboard"
-        element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}
-      >
-        <Route index element={<DashboardHome />} />
-        
-        {/* ✅ Invoice Routes - FIXED */}
-        <Route path="create-invoice" element={<InvoiceApp />} />
-        <Route path="create-invoice/:invoiceId" element={<InvoiceApp />} /> {/* Edit draft */}
-        <Route path="invoice/:invoiceId" element={<InvoiceViewerPage />} /> {/* ✅ NEW: View final */}
-        
-        {/* Other Dashboard Routes */}
-        <Route path="invoices" element={<InvoiceListPage />} />
-        <Route path="drafts" element={<DraftsPage />} />
-        <Route path="profile" element={<ProfilePage />} />
-      </Route>
+        {/* Dashboard Routes */}
+        <Route
+          path="/dashboard"
+          element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}
+        >
+          <Route index element={<DashboardHome />} />
 
-      {/* Root & Fallback */}
-      <Route
-        path="/"
-        element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />}
-      />
-      <Route
-        path="*"
-        element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />}
-      />
-    </Routes>
+          {/* ✅ Invoice Routes - FIXED */}
+          <Route path="create-invoice" element={<InvoiceApp />} />
+          <Route path="create-invoice/:invoiceId" element={<InvoiceApp />} /> {/* Edit draft */}
+          <Route path="invoice/:invoiceId" element={<InvoiceViewerPage />} /> {/* ✅ NEW: View final */}
+
+          {/* Other Dashboard Routes */}
+          <Route path="invoices" element={<InvoiceListPage />} />
+          <Route path="drafts" element={<DraftsPage />} />
+          <Route path="profile" element={<ProfilePage />} />
+        </Route>
+
+        {/* Root & Fallback */}
+        <Route
+          path="/"
+          element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />}
+        />
+        <Route
+          path="*"
+          element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />}
+        />
+      </Routes>
+    </>
   );
 }

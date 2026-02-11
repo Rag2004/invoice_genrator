@@ -8,6 +8,7 @@ import { AuthProvider } from './context/AuthContext.jsx';
 import './index.css';
 import './styles.css';
 
+console.log('App mounting - version v2');
 ReactDOM.createRoot(document.getElementById('root')).render(
   <BrowserRouter>
     <AuthProvider>

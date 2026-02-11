@@ -1,9 +1,9 @@
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import './styles.css';
 import { useParams, useNavigate } from 'react-router-dom';
 
-import TeamSummary from './components/TeamSummary';
+import StagesConfig from './components/StagesConfig';
 import InvoiceComplete from './components/InvoiceComplete';
 import ShareInvoiceDialog from './components/ui/ShareInvoiceDialog';
 import InvoicePreviewModal from './components/InvoicePreviewModal';
@@ -11,6 +11,7 @@ import InvoicePreviewModal from './components/InvoicePreviewModal';
 import { getTeam, getInvoiceSetup, shareInvoice, createDraft, updateDraft, finalizeInvoice, getInvoice, getModes, clearTeamCache, getCompanyDetails } from './api/api';
 import { useAuth } from './context/AuthContext';
 import { LOGO_URL } from "./config/branding";
+import { toast } from 'react-toastify';
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:4000/api";
 
@@ -206,6 +207,148 @@ export default function Invoice() {
       return recalc(updated);
     });
   };
+
+  /* ============================================================================
+     ✅ AUTO-SAVE DRAFT — saves silently on tab close, back button, or inactivity
+  ============================================================================ */
+
+  const invoiceRef2 = useRef(invoice);
+  const userRef = useRef(user);
+  const isSavingRef = useRef(false);
+  const autoSaveTimerRef = useRef(null);
+  const lastSavedRef = useRef(JSON.stringify({}));
+
+  // Keep refs in sync
+  useEffect(() => { invoiceRef2.current = invoice; }, [invoice]);
+  useEffect(() => { userRef.current = user; }, [user]);
+  useEffect(() => { isSavingRef.current = isSaving; }, [isSaving]);
+
+  // Silent auto-save (no alerts, no validation popups)
+  const autoSaveDraft = useCallback(async () => {
+    const inv = invoiceRef2.current;
+    const usr = userRef.current;
+
+    // Skip if: already saving, finalized, or no meaningful data
+    if (isSavingRef.current) return;
+    if (inv.status === 'FINAL') return;
+    if (!inv.projectCode || inv.projectCode.trim() === '') return;
+
+    const consultantId = usr?.consultantId || usr?.consultant_id;
+    if (!consultantId) return;
+    if (inv.consultantId && inv.consultantId !== consultantId) return;
+
+    // Skip if nothing changed since last save
+    const currentSnapshot = JSON.stringify({
+      projectCode: inv.projectCode, notes: inv.notes, date: inv.date,
+      stages: inv.stages, items: inv.items?.map(i => ({ memberId: i.memberId, mode: i.mode, stageHours: i.stageHours })),
+    });
+    if (currentSnapshot === lastSavedRef.current) return;
+
+    try {
+      isSavingRef.current = true;
+      const payload = {
+        consultantId,
+        invoiceData: {
+          date: inv.date,
+          notes: inv.notes,
+          project: { projectCode: inv.projectCode },
+          client: {
+            code: inv.clientCode, name: inv.clientName,
+            businessName: inv.businessName, billingAddress: inv.billingAddress,
+          },
+          consultant: {
+            id: inv.consultantId, name: inv.consultantName, email: inv.consultantEmail,
+          },
+          work: {
+            stages: inv.stages,
+            items: (inv.items || []).map(item => ({
+              memberId: item.memberId, name: item.name, mode: item.mode,
+              rate: item.rate, factor: item.factor, stageHours: item.stageHours || {},
+            })),
+          },
+          config: {
+            baseHourlyRate: inv.baseHourlyRate,
+            serviceFeePct: inv.serviceFeePct,
+            gstRate: inv.gstRate,
+          },
+        },
+      };
+
+      let result;
+      if (inv.invoiceId) {
+        result = await updateDraft(inv.invoiceId, payload);
+      } else {
+        result = await createDraft(payload);
+      }
+
+      if (result?.ok) {
+        lastSavedRef.current = currentSnapshot;
+        // Update invoiceId if newly created
+        if (!inv.invoiceId && result.invoiceId) {
+          setInvoice(prev => ({ ...prev, invoiceId: result.invoiceId }));
+          window.history.replaceState({}, '', `/dashboard/create-invoice/${result.invoiceId}`);
+        }
+        console.log('✅ Auto-saved draft');
+        toast.info('📝 Draft auto-saved', {
+          toastId: 'auto-save',
+          autoClose: 2000,
+          hideProgressBar: true,
+          position: 'bottom-right',
+        });
+      }
+    } catch (err) {
+      console.warn('⚠️ Auto-save failed:', err.message);
+    } finally {
+      isSavingRef.current = false;
+    }
+  }, []);
+
+  // 🔒 Save on tab close / refresh
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      autoSaveDraft();
+      // Show browser's native "Leave page?" prompt
+      e.preventDefault();
+      e.returnValue = '';
+    };
+
+    // 🔒 Save when tab becomes hidden (user switches tabs or minimizes)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        autoSaveDraft();
+      }
+    };
+
+    // 🔒 Save on back/forward navigation
+    const handlePopState = () => {
+      autoSaveDraft();
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('popstate', handlePopState);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [autoSaveDraft]);
+
+  // ⏱️ Debounced periodic auto-save (30s after last change)
+  useEffect(() => {
+    if (invoice.status === 'FINAL') return;
+    if (!invoice.projectCode) return;
+
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      autoSaveDraft();
+    }, 30000);
+
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  }, [invoice, autoSaveDraft]);
 
   /* ============================================================================
      ✅ LOAD TEAM OPTIONS - Now stores all rows and groups by member name
@@ -1121,19 +1264,29 @@ export default function Invoice() {
 
         {/* Stage Groups & Sub-Stages Card */}
         <div className="card">
-          <div className="section-header-row">
-            <div className="blue-accent-bar" />
-            <h2 className="section-title-alt">📊 Stage Groups & Sub-Stages</h2>
+          <div className="section-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div className="blue-accent-bar" />
+              <h2 className="section-title-alt" style={{ margin: 0 }}>📊 Stage Groups & Sub-Stages</h2>
+            </div>
+            <button
+              className="btn btn-primary btn-sm"
+              type="button"
+              onClick={() => updateInvoice((prev) => {
+                const newStage = {
+                  id: `stage-${Date.now()}`,
+                  stage: '',
+                  percentage: '',
+                  days: '',
+                  subStages: [{ id: `sub-${Date.now()}`, label: '' }],
+                };
+                return { ...prev, stages: [...(prev.stages || []), newStage] };
+              })}
+            >
+              + Add Stage
+            </button>
           </div>
-          {/* <div style={{ 
-          fontSize: '0.875rem', 
-          color: '#64748b', 
-          marginBottom: '16px',
-          lineHeight: '1.5'
-        }}>
-          Configure stages (e.g., Stage 1 = 30%) and their sub-stages. These become the columns in the table below.
-        </div> */}
-          <TeamSummary
+          <StagesConfig
             invoice={invoice}
             updateInvoice={updateInvoice}
             teamOptions={teamOptions}
@@ -1157,7 +1310,7 @@ export default function Invoice() {
         }}>
           Enter hours for each sub-stage per team member. Factors & rates are calculated automatically.
         </div> */}
-          <TeamSummary
+          <StagesConfig
             invoice={invoice}
             updateInvoice={updateInvoice}
             teamOptions={teamOptions}
