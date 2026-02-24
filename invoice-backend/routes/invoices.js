@@ -6,9 +6,23 @@
 
 const express = require('express');
 const router = express.Router();
+const fs = require('fs');
+const path = require('path');
 const apps = require('../lib/appsScriptClient');
 const logger = require('../utils/logger');
 const { sendInvoiceEmail } = require('../utils/invoiceEmailService');
+const { generateInvoicePDF } = require('../utils/pdfGenerator');
+
+// Load logo for PDF generation
+const logoPath = path.join(__dirname, '../assets/logo.png');
+let logoBase64 = '';
+try {
+  if (fs.existsSync(logoPath)) {
+    logoBase64 = fs.readFileSync(logoPath).toString('base64');
+  }
+} catch (err) {
+  console.error('Error loading PDF logo:', err);
+}
 
 /* ============================================================================
    HELPER: Extract consultantId
@@ -34,7 +48,7 @@ async function verifyInvoiceOwnership(invoiceId, consultantId) {
 
   try {
     const result = await apps.getInvoiceById(invoiceId);
-    
+
     if (!result?.ok) {
       return { ok: false, error: 'Invoice not found', statusCode: 404 };
     }
@@ -135,7 +149,7 @@ router.post('/draft/:invoiceId', async (req, res) => {
     const { invoiceData } = req.body;
 
     // ✅ Support nested structure
-    const projectCode = 
+    const projectCode =
       invoiceData?.project?.projectCode || invoiceData?.projectCode;
 
     logger.info(
@@ -317,9 +331,9 @@ router.post('/finalize', async (req, res) => {
     // ✅ Log if client email was returned (for debugging)
     if (result.clientEmail) {
       logger.info(
-        { 
-          invoiceId: result.invoiceId, 
-          clientEmail: result.clientEmail.replace(/(?<=.{2}).*(?=@)/, '***') 
+        {
+          invoiceId: result.invoiceId,
+          clientEmail: result.clientEmail.replace(/(?<=.{2}).*(?=@)/, '***')
         },
         '✅ Invoice finalized with client email'
       );
@@ -358,7 +372,7 @@ router.get('/', async (req, res) => {
     logger.info({ consultantId }, 'Listing invoices');
 
     const result = await apps.listInvoicesByConsultant(consultantId);
-    
+
     if (!result?.ok) {
       return res.status(500).json({ ok: false, invoices: [] });
     }
@@ -414,53 +428,147 @@ router.get('/:invoiceId', async (req, res) => {
 });
 
 /* ============================================================================
+   📄 DOWNLOAD INVOICE PDF - Puppeteer-based server-side rendering
+   Returns a downloadable PDF file generated from the invoice snapshot
+============================================================================ */
+router.get('/:invoiceId/pdf', async (req, res) => {
+  try {
+    const consultantId = getConsultantId(req);
+    const { invoiceId } = req.params;
+
+    if (!consultantId || !invoiceId) {
+      return res.status(400).json({
+        ok: false,
+        error: 'consultantId and invoiceId required'
+      });
+    }
+
+    // Verify ownership
+    const ownership = await verifyInvoiceOwnership(invoiceId, consultantId);
+    if (!ownership.ok) {
+      return res.status(ownership.statusCode || 403).json({
+        ok: false,
+        error: ownership.error
+      });
+    }
+
+    const invoice = ownership.invoice;
+
+    // Only finalized invoices have snapshots
+    if (String(invoice.status).toUpperCase() !== 'FINAL') {
+      return res.status(400).json({
+        ok: false,
+        error: 'Can only generate PDF for finalized invoices'
+      });
+    }
+
+    // Parse snapshot
+    let snapshot;
+    try {
+      snapshot = typeof invoice.snapshot === 'string'
+        ? JSON.parse(invoice.snapshot)
+        : invoice.snapshot;
+    } catch (err) {
+      logger.error({ invoiceId, error: err.message }, 'Failed to parse snapshot for PDF');
+      return res.status(400).json({
+        ok: false,
+        error: 'Invalid invoice snapshot format'
+      });
+    }
+
+    if (!snapshot) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Invoice snapshot not found'
+      });
+    }
+
+    logger.info({ invoiceId, invoiceNumber: invoice.invoiceNumber }, 'Generating PDF...');
+
+    // Generate HTML from snapshot (reuse existing helper)
+    const invoiceHTML = generateInvoiceHTMLFromSnapshot(snapshot);
+
+    // Generate PDF using Puppeteer
+    const pdfBuffer = await generateInvoicePDF(invoiceHTML, {
+      invoiceNumber: invoice.invoiceNumber || invoiceId,
+      projectCode: snapshot.project?.projectCode || 'N/A',
+    });
+
+    const filename = `${invoice.invoiceNumber || 'Invoice'}.pdf`;
+
+    logger.info({
+      invoiceId,
+      invoiceNumber: invoice.invoiceNumber,
+      pdfSize: pdfBuffer.length
+    }, 'PDF generated successfully');
+
+    // Send PDF as downloadable file
+    // Use res.end() + Buffer.from() to avoid any string encoding that res.send() might apply
+    const pdfFilename = encodeURIComponent(filename);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"; filename*=UTF-8''${pdfFilename}`);
+    res.setHeader('Cache-Control', 'no-cache, no-store');
+    res.setHeader('Pragma', 'no-cache');
+
+    return res.end(Buffer.from(pdfBuffer));
+
+  } catch (err) {
+    logger.error({ error: err.message, stack: err.stack }, 'PDF generation failed');
+    return res.status(500).json({
+      ok: false,
+      error: `PDF generation failed: ${err.message}`
+    });
+  }
+});
+
+/* ============================================================================
    🔒 SECURE SHARE INVOICE - USES CLIENT EMAIL FROM INVOICE DATA ONLY
    ✅ UPDATED: No toEmail parameter - fetches from invoice snapshot
 ============================================================================ */
 router.post('/share', async (req, res) => {
   try {
     const consultantId = getConsultantId(req);
-    const { 
-      invoiceId, 
-      html, 
-      projectCode, 
-      consultantName, 
-      total, 
-      subtotal, 
-      gst 
+    const {
+      invoiceId,
+      html,
+      projectCode,
+      consultantName,
+      total,
+      subtotal,
+      gst
     } = req.body;
-    
+
     logger.info({
       consultantId,
       invoiceId: invoiceId || 'UNKNOWN',
       hasHtml: !!html
     }, '📧 Share invoice request');
-    
+
     // ✅ VALIDATION: Required fields
     if (!html) {
-      return res.status(400).json({ 
-        ok: false, 
-        error: 'Invoice HTML required' 
+      return res.status(400).json({
+        ok: false,
+        error: 'Invoice HTML required'
       });
     }
-    
+
     if (!invoiceId) {
-      return res.status(400).json({ 
-        ok: false, 
-        error: 'Invoice ID required - cannot share drafts' 
+      return res.status(400).json({
+        ok: false,
+        error: 'Invoice ID required - cannot share drafts'
       });
     }
-    
+
     // ✅ SECURITY: Verify ownership
     if (consultantId) {
       const ownership = await verifyInvoiceOwnership(invoiceId, consultantId);
       if (!ownership.ok) {
-        return res.status(ownership.statusCode || 403).json({ 
-          ok: false, 
-          error: ownership.error 
+        return res.status(ownership.statusCode || 403).json({
+          ok: false,
+          error: ownership.error
         });
       }
-      
+
       // ✅ CRITICAL: Only allow sharing finalized invoices
       if (String(ownership.invoice.status).toUpperCase() !== 'FINAL') {
         return res.status(400).json({
@@ -469,37 +577,37 @@ router.post('/share', async (req, res) => {
         });
       }
     }
-    
+
     // ✅ SECURITY: Fetch invoice to get CLIENT EMAIL from stored data
     const invoiceResult = await apps.getInvoiceById(invoiceId);
-    
+
     if (!invoiceResult?.ok) {
       return res.status(404).json({
         ok: false,
         error: 'Invoice not found'
       });
     }
-    
+
     const invoice = invoiceResult.invoice;
-    
+
     // ✅ CRITICAL: Extract client email from invoice snapshot (SINGLE SOURCE OF TRUTH)
     let clientEmail = null;
-    
+
     if (invoice.snapshot?.client?.email) {
       clientEmail = invoice.snapshot.client.email;
     } else if (invoice.client?.email) {
       clientEmail = invoice.client.email;
     }
-    
+
     // ✅ VALIDATION: Client email must exist in invoice data
     if (!clientEmail || !clientEmail.trim()) {
       logger.error({ invoiceId }, '❌ Client email missing in invoice data');
-      return res.status(400).json({ 
-        ok: false, 
-        error: 'Client email not found in invoice data. Please contact support.' 
+      return res.status(400).json({
+        ok: false,
+        error: 'Client email not found in invoice data. Please contact support.'
       });
     }
-    
+
     // ✅ VALIDATION: Email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(clientEmail)) {
@@ -509,12 +617,12 @@ router.post('/share', async (req, res) => {
         error: 'Invalid client email format in records'
       });
     }
-    
-    logger.info({ 
-      invoiceId, 
+
+    logger.info({
+      invoiceId,
       clientEmail: clientEmail.replace(/(?<=.{2}).*(?=@)/, '***') // Mask for logs
     }, '✅ Using client email from invoice data');
-    
+
     // ✅ BUILD EMAIL PAYLOAD
     const emailPayload = {
       invoiceNumber: invoice.invoiceNumber || invoiceId,
@@ -526,32 +634,32 @@ router.post('/share', async (req, res) => {
       subtotal: subtotal || invoice.totals?.subtotal || invoice.subtotal || 0,
       gst: gst || invoice.totals?.gst || invoice.gst || 0,
     };
-    
+
     // ✅ SEND EMAIL (toEmail comes from invoice data ONLY)
     const result = await sendInvoiceEmail({
       toEmail: clientEmail, // 🔒 SECURITY: From invoice data only
       invoice: emailPayload,
       invoiceHTML: html
     });
-    
-    logger.info({ 
-      invoiceId, 
+
+    logger.info({
+      invoiceId,
       clientEmail: clientEmail.replace(/(?<=.{2}).*(?=@)/, '***')
     }, '✅ Invoice sent successfully to client');
-    
-    return res.json({ 
-      ok: true, 
+
+    return res.json({
+      ok: true,
       message: 'Invoice sent successfully to client',
       sentTo: clientEmail.replace(/(?<=.{2}).*(?=@)/, '***'), // Masked response
       format: result.format,
       hasPDF: result.hasPDF
     });
-    
+
   } catch (err) {
     logger.error({ error: err.message }, '❌ Share invoice failed');
-    return res.status(500).json({ 
-      ok: false, 
-      error: err.message || 'Failed to send invoice' 
+    return res.status(500).json({
+      ok: false,
+      error: err.message || 'Failed to send invoice'
     });
   }
 });
@@ -565,30 +673,30 @@ router.post('/share-auto', async (req, res) => {
   try {
     const consultantId = getConsultantId(req);
     const { invoiceId } = req.body;
-    
+
     logger.info({
       consultantId,
       invoiceId: invoiceId || 'UNKNOWN'
     }, '🚀 Auto-share invoice request');
-    
+
     // ✅ VALIDATION: Invoice ID required
     if (!invoiceId) {
-      return res.status(400).json({ 
-        ok: false, 
-        error: 'Invoice ID required' 
+      return res.status(400).json({
+        ok: false,
+        error: 'Invoice ID required'
       });
     }
-    
+
     // ✅ SECURITY: Verify ownership
     if (consultantId) {
       const ownership = await verifyInvoiceOwnership(invoiceId, consultantId);
       if (!ownership.ok) {
-        return res.status(ownership.statusCode || 403).json({ 
-          ok: false, 
-          error: ownership.error 
+        return res.status(ownership.statusCode || 403).json({
+          ok: false,
+          error: ownership.error
         });
       }
-      
+
       // ✅ CRITICAL: Only allow sharing finalized invoices
       if (String(ownership.invoice.status).toUpperCase() !== 'FINAL') {
         return res.status(400).json({
@@ -597,24 +705,24 @@ router.post('/share-auto', async (req, res) => {
         });
       }
     }
-    
+
     // ✅ FETCH: Get full invoice with snapshot
     const invoiceResult = await apps.getInvoiceById(invoiceId);
-    
+
     if (!invoiceResult?.ok) {
       return res.status(404).json({
         ok: false,
         error: 'Invoice not found'
       });
     }
-    
+
     const invoice = invoiceResult.invoice;
-    
+
     // ✅ PARSE: Extract snapshot
     let snapshot;
     try {
-      snapshot = typeof invoice.snapshot === 'string' 
-        ? JSON.parse(invoice.snapshot) 
+      snapshot = typeof invoice.snapshot === 'string'
+        ? JSON.parse(invoice.snapshot)
         : invoice.snapshot;
     } catch (err) {
       logger.error({ invoiceId, error: err.message }, '❌ Failed to parse snapshot');
@@ -623,25 +731,25 @@ router.post('/share-auto', async (req, res) => {
         error: 'Invalid invoice snapshot format'
       });
     }
-    
+
     if (!snapshot) {
       return res.status(400).json({
         ok: false,
         error: 'Invoice snapshot not found. Cannot share draft invoices.'
       });
     }
-    
+
     // ✅ EXTRACT: Client email from snapshot
     const clientEmail = snapshot?.client?.email;
-    
+
     if (!clientEmail || !clientEmail.trim()) {
       logger.error({ invoiceId }, '❌ Client email missing in invoice snapshot');
-      return res.status(400).json({ 
-        ok: false, 
-        error: 'Client email not found in invoice. Please update the project with client email and regenerate the invoice.' 
+      return res.status(400).json({
+        ok: false,
+        error: 'Client email not found in invoice. Please update the project with client email and regenerate the invoice.'
       });
     }
-    
+
     // ✅ VALIDATE: Email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(clientEmail)) {
@@ -651,15 +759,15 @@ router.post('/share-auto', async (req, res) => {
         error: 'Invalid client email format in invoice data'
       });
     }
-    
-    logger.info({ 
-      invoiceId, 
+
+    logger.info({
+      invoiceId,
       clientEmail: clientEmail.replace(/(?<=.{2}).*(?=@)/, '***')
     }, '✅ Client email found, generating invoice HTML');
-    
+
     // ✅ GENERATE: Invoice HTML from snapshot
     const invoiceHTML = generateInvoiceHTMLFromSnapshot(snapshot);
-    
+
     // ✅ BUILD: Email payload
     const emailPayload = {
       invoiceNumber: snapshot.meta?.invoiceNumber || invoice.invoiceNumber || invoiceId,
@@ -671,22 +779,22 @@ router.post('/share-auto', async (req, res) => {
       subtotal: snapshot.totals?.subtotal || 0,
       gst: snapshot.totals?.gst || 0,
     };
-    
+
     // ✅ SEND: Email with PDF
     const emailResult = await sendInvoiceEmail({
       toEmail: clientEmail,
       invoice: emailPayload,
       invoiceHTML: invoiceHTML
     });
-    
-    logger.info({ 
+
+    logger.info({
       invoiceId,
       invoiceNumber: emailPayload.invoiceNumber,
       clientEmail: clientEmail.replace(/(?<=.{2}).*(?=@)/, '***'),
       hasPDF: emailResult.hasPDF
     }, '✅ Invoice auto-shared successfully');
-    
-    return res.json({ 
+
+    return res.json({
       ok: true,
       success: true,
       message: 'Invoice sent successfully',
@@ -697,12 +805,12 @@ router.post('/share-auto', async (req, res) => {
       format: emailResult.format,
       messageId: emailResult.messageId
     });
-    
+
   } catch (err) {
     logger.error({ error: err.message, stack: err.stack }, '❌ Auto-share failed');
-    return res.status(500).json({ 
-      ok: false, 
-      error: err.message || 'Failed to share invoice' 
+    return res.status(500).json({
+      ok: false,
+      error: err.message || 'Failed to share invoice'
     });
   }
 });
@@ -723,10 +831,16 @@ function generateInvoiceHTMLFromSnapshot(snapshot) {
   const consultant = snapshot.consultant || {};
   const client = snapshot.client || {};
   const work = snapshot.work || {};
+  const stages = work.stages || [];
+  const items = work.items || [];
   const totals = snapshot.totals || {};
   const serviceProvider = snapshot.serviceProvider || {};
   const compliance = snapshot.compliance || {};
+  const project = snapshot.project || {};
   const notes = snapshot.notes || '';
+
+  // Helper to check if value is truly empty
+  const isEmpty = (val) => val === "" || val === null || val === undefined;
 
   return `
 <!DOCTYPE html>
@@ -737,16 +851,19 @@ function generateInvoiceHTMLFromSnapshot(snapshot) {
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: 'Helvetica', Arial, sans-serif;
+      font-family: 'Helvetica', 'Helvetica Neue', Arial, sans-serif;
       background: #ffffff;
       color: #2d3748;
       font-size: 10pt;
       line-height: 1.4;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
     }
     .invoice-container {
       max-width: 210mm;
       margin: 0 auto;
       background: white;
+      padding-bottom: 30px;
     }
     .header {
       background: #e8e8e8;
@@ -776,6 +893,9 @@ function generateInvoiceHTMLFromSnapshot(snapshot) {
     .section-body {
       padding: 16px 30px;
     }
+    .section-body.compact {
+      padding: 12px 30px;
+    }
     .info-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -799,11 +919,53 @@ function generateInvoiceHTMLFromSnapshot(snapshot) {
       color: #2d3748;
       font-weight: 400;
       line-height: 1.3;
+      word-wrap: break-word;
     }
     .info-value.empty {
       color: #a0aec0;
       font-style: italic;
     }
+    .info-value.strong {
+      font-weight: 700;
+    }
+
+    /* Stages Grid */
+    .stages-grid {
+      display: grid;
+      grid-template-columns: 70px 1fr 140px;
+      gap: 0;
+      border: 1px solid #cbd5e0;
+      font-size: 9pt;
+      margin: 16px 0;
+    }
+    .stages-header {
+      background: #e8e8e8;
+      padding: 10px 12px;
+      font-size: 7.5pt;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: #4a5568;
+      letter-spacing: 0.5px;
+      border-bottom: 2px solid #cbd5e0;
+      border-right: 1px solid #e2e8f0;
+    }
+    .stages-header:last-child { border-right: none; }
+    .stages-header.center { text-align: center; }
+    .stages-cell {
+      padding: 12px;
+      border-bottom: 1px solid #e2e8f0;
+      border-right: 1px solid #e2e8f0;
+      font-size: 9pt;
+      color: #2d3748;
+    }
+    .stages-cell:nth-child(3n) { border-right: none; }
+    .stages-cell.center { text-align: center; }
+    .stages-cell.strong { font-weight: 700; }
+    .stages-cell:last-child, .stages-cell:nth-last-child(2), .stages-cell:nth-last-child(3) {
+      border-bottom: none;
+    }
+
+    /* Billing Table */
     table {
       width: 100%;
       border-collapse: collapse;
@@ -821,36 +983,25 @@ function generateInvoiceHTMLFromSnapshot(snapshot) {
       color: #4a5568;
       border-bottom: 2px solid #cbd5e0;
       border-right: 1px solid #e2e8f0;
+      letter-spacing: 0.5px;
     }
-    thead th:last-child {
-      border-right: none;
-    }
-    thead th.right {
-      text-align: right;
-    }
-    thead th.center {
-      text-align: center;
-    }
+    thead th:last-child { border-right: none; }
+    thead th.right { text-align: right; }
+    thead th.center { text-align: center; }
     tbody td {
       padding: 12px;
       border-bottom: 1px solid #e2e8f0;
       border-right: 1px solid #e2e8f0;
       font-size: 9pt;
       color: #2d3748;
+      vertical-align: middle;
     }
-    tbody td:last-child {
-      border-right: none;
-    }
-    tbody tr:last-child td {
-      border-bottom: none;
-    }
-    tbody td.center {
-      text-align: center;
-    }
-    tbody td.right {
-      text-align: right;
-      font-weight: 600;
-    }
+    tbody td:last-child { border-right: none; }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody td.center { text-align: center; }
+    tbody td.right { text-align: right; font-weight: 600; }
+    .stage-col { text-align: center; width: 70px; font-weight: 600; }
+
     .totals-section {
       margin-top: 20px;
       display: grid;
@@ -883,14 +1034,8 @@ function generateInvoiceHTMLFromSnapshot(snapshot) {
       align-items: center;
       gap: 30px;
     }
-    .totals-row:last-child {
-      border-bottom: none;
-    }
-    .totals-label {
-      font-size: 9pt;
-      color: #2d3748;
-      font-weight: 600;
-    }
+    .totals-row:last-child { border-bottom: none; }
+    .totals-label { font-size: 9pt; color: #2d3748; font-weight: 600; }
     .totals-value {
       font-size: 9pt;
       font-weight: 600;
@@ -898,15 +1043,24 @@ function generateInvoiceHTMLFromSnapshot(snapshot) {
       text-align: right;
       white-space: nowrap;
     }
-    .totals-row.total {
+    .totals-row.total, .totals-row.balance {
       background: #2d3748;
+      border: none;
     }
-    .totals-row.total .totals-label,
-    .totals-row.total .totals-value {
+    .totals-row.total .totals-label, .totals-row.total .totals-value,
+    .totals-row.balance .totals-label, .totals-row.balance .totals-value {
       color: #ffffff;
       font-size: 10pt;
       font-weight: 700;
     }
+    
+    .terms-text {
+      font-size: 8pt;
+      color: #4a5568;
+      line-height: 1.6;
+    }
+    .terms-text p { margin: 0 0 6px 0; }
+
     .footer {
       padding: 20px 30px;
       border-top: 2px solid #cbd5e0;
@@ -915,6 +1069,11 @@ function generateInvoiceHTMLFromSnapshot(snapshot) {
       color: #718096;
       text-transform: uppercase;
       letter-spacing: 1px;
+    }
+    
+    @media print {
+      .section-body { page-break-inside: avoid; }
+      .page-break-before { page-break-before: always; }
     }
   </style>
 </head>
@@ -925,10 +1084,10 @@ function generateInvoiceHTMLFromSnapshot(snapshot) {
       <div class="invoice-title">INVOICE</div>
     </div>
 
-    <!-- Service Provider -->
+    <!-- Hourly Ventures LLP -->
     <div class="section">
-      <div class="section-header">HOURLY VENTURES LLP</div>
-      <div class="section-body">
+      <div class="section-header">${serviceProvider.name || 'HOURLY VENTURES LLP'}</div>
+      <div class="section-body compact">
         <div class="info-grid">
           <div class="info-item">
             <div class="info-label">Registered Office</div>
@@ -961,37 +1120,27 @@ function generateInvoiceHTMLFromSnapshot(snapshot) {
     <!-- Service Provider (Consultant) -->
     <div class="section">
       <div class="section-header">SERVICE PROVIDER</div>
-      <div class="section-body">
+      <div class="section-body compact">
         <div class="info-grid">
           <div class="info-item">
             <div class="info-label">Business Name</div>
-            <div class="info-value ${!consultant.businessName ? 'empty' : ''}">
-              ${consultant.businessName || 'Not provided'}
-            </div>
+            <div class="info-value ${!consultant.businessName ? 'empty' : ''}">${consultant.businessName || 'Not provided'}</div>
           </div>
           <div class="info-item">
             <div class="info-label">Registered Office</div>
-            <div class="info-value ${!consultant.registeredOffice ? 'empty' : ''}">
-              ${consultant.registeredOffice || 'Not provided'}
-            </div>
+            <div class="info-value ${!consultant.registeredOffice ? 'empty' : ''}">${consultant.registeredOffice || 'Not provided'}</div>
           </div>
           <div class="info-item">
             <div class="info-label">State Name & Code</div>
-            <div class="info-value ${!consultant.stateCode ? 'empty' : ''}">
-              ${consultant.stateCode || 'Not provided'}
-            </div>
+            <div class="info-value ${!consultant.stateCode ? 'empty' : ''}">${consultant.stateCode || 'Not provided'}</div>
           </div>
           <div class="info-item">
             <div class="info-label">PAN</div>
-            <div class="info-value ${!consultant.pan ? 'empty' : ''}">
-              ${consultant.pan || 'Not provided'}
-            </div>
+            <div class="info-value ${!consultant.pan ? 'empty' : ''}">${consultant.pan || 'Not provided'}</div>
           </div>
           <div class="info-item">
             <div class="info-label">GSTIN</div>
-            <div class="info-value ${!consultant.gstin ? 'empty' : ''}">
-              ${consultant.gstin || 'Not provided'}
-            </div>
+            <div class="info-value ${!consultant.gstin ? 'empty' : ''}">${consultant.gstin || 'Not provided'}</div>
           </div>
         </div>
       </div>
@@ -1000,11 +1149,11 @@ function generateInvoiceHTMLFromSnapshot(snapshot) {
     <!-- Client -->
     <div class="section">
       <div class="section-header">CLIENT</div>
-      <div class="section-body">
+      <div class="section-body compact">
         <div class="info-grid">
           <div class="info-item">
             <div class="info-label">Name (ID)</div>
-            <div class="info-value">${client.name || 'Not provided'}</div>
+            <div class="info-value">${client.name || 'Not provided'}${client.code ? ` (${client.code})` : ''}</div>
           </div>
           <div class="info-item">
             <div class="info-label">Billing Address</div>
@@ -1026,18 +1175,18 @@ function generateInvoiceHTMLFromSnapshot(snapshot) {
       </div>
     </div>
 
-    <!-- Invoice Details -->
+    <!-- Invoice and Service Details -->
     <div class="section">
       <div class="section-header">INVOICE AND SERVICE DETAILS</div>
-      <div class="section-body">
+      <div class="section-body compact">
         <div class="info-grid">
           <div class="info-item">
             <div class="info-label">Invoice No.</div>
-            <div class="info-value">${meta.invoiceNumber || '—'}</div>
+            <div class="info-value strong">${meta.invoiceNumber || '—'}</div>
           </div>
           <div class="info-item">
             <div class="info-label">Invoice Date</div>
-            <div class="info-value">${meta.invoiceDate || '—'}</div>
+            <div class="info-value strong">${meta.invoiceDate || '—'}</div>
           </div>
           <div class="info-item">
             <div class="info-label">SAC Code</div>
@@ -1052,15 +1201,51 @@ function generateInvoiceHTMLFromSnapshot(snapshot) {
             <div class="info-value">${consultant.name || 'Not provided'}</div>
           </div>
           <div class="info-item">
+            <div class="info-label">Consultant ID</div>
+            <div class="info-value strong">${consultant.id || 'Not provided'}</div>
+          </div>
+          <div class="info-item">
             <div class="info-label">Consultant Fee (Hourly)</div>
-            <div class="info-value">${formatINR(consultant.hourlyRate || 0)}/hr</div>
+            <div class="info-value strong">${formatINR(consultant.hourlyRate || 0)}/hr</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Project ID</div>
+            <div class="info-value strong">${project.projectCode || 'Not provided'}</div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Team Summary -->
+    <!-- Stages and Inclusions -->
+    ${stages.length > 0 ? `
     <div class="section">
+      <div class="section-header">STAGES AND INCLUSIONS</div>
+      <div class="section-body">
+        <div class="stages-grid">
+          <div class="stages-header">Sr. No.</div>
+          <div class="stages-header">Inclusions / Description</div>
+          <div class="stages-header center">Timeline (Days)</div>
+          ${stages.map((stage, idx) => {
+    const subStagesText = (stage?.subStages || [])
+      .map(x => x?.label || x?.name)
+      .filter(Boolean)
+      .join(", ");
+    return `
+            <div class="stages-cell center strong">${idx + 1}.</div>
+            <div class="stages-cell">
+              ${stage?.stage ? `<strong>${stage.stage}: </strong>` : ''}
+              ${stage?.description || subStagesText || '—'}
+            </div>
+            <div class="stages-cell center strong">${stage?.days ? Number(stage.days) : '—'}</div>
+            `;
+  }).join('')}
+        </div>
+      </div>
+    </div>
+    ` : ''}
+
+    <!-- Team Summary and Billing -->
+    <div class="section page-break-before">
       <div class="section-header">TEAM SUMMARY AND BILLING</div>
       <div class="section-body">
         <table>
@@ -1069,33 +1254,53 @@ function generateInvoiceHTMLFromSnapshot(snapshot) {
               <th style="width: 5%">#</th>
               <th style="width: 25%">Team Member</th>
               <th class="center" style="width: 20%">Mode</th>
+              ${stages.slice(0, 6).map((_, idx) => `
+                <th class="center stage-col">Stage ${idx + 1}</th>
+              `).join('')}
               <th class="right" style="width: 12%">Rate</th>
               <th class="right" style="width: 15%">Amount</th>
             </tr>
           </thead>
           <tbody>
-            ${(work.items || []).map((item, idx) => `
+            ${items.map((item, idx) => {
+    const stageHours = item?.stageHours || {};
+    return `
               <tr>
                 <td class="center">${idx + 1}</td>
                 <td>${item.name || '—'}</td>
                 <td class="center">${item.mode || '—'}</td>
+                ${stages.slice(0, 6).map((stage) => {
+      const sid = stage.id ?? "";
+      const subMap = stageHours[sid] || {};
+      const totalStageHours = Object.values(subMap).reduce((sum, v) => sum + (Number(v) || 0), 0);
+      return `
+                  <td class="center stage-col">${totalStageHours > 0 ? totalStageHours : '—'}</td>
+                  `;
+    }).join('')}
                 <td class="right">${formatINR(item.rate || 0)}</td>
                 <td class="right">${formatINR(item.amount || 0)}</td>
               </tr>
-            `).join('')}
+              `;
+  }).join('')}
           </tbody>
         </table>
 
         <div class="totals-section">
           <div class="notes-box">
             <div class="notes-label">NOTES</div>
-            <div>${notes || 'No additional notes'}</div>
+            <div style="font-size: 9pt; color: ${notes ? '#2d3748' : '#a0aec0'}; font-style: ${notes ? 'normal' : 'italic'}">
+              ${notes || 'No additional notes'}
+            </div>
           </div>
           
           <div class="totals-box">
             <div class="totals-row">
               <div class="totals-label">Subtotal</div>
               <div class="totals-value">${formatINR(totals.subtotal || 0)}</div>
+            </div>
+            <div class="totals-row">
+              <div class="totals-label">Adjustment</div>
+              <div class="totals-value">${formatINR(0)}</div>
             </div>
             <div class="totals-row">
               <div class="totals-label">Tax</div>
@@ -1105,14 +1310,32 @@ function generateInvoiceHTMLFromSnapshot(snapshot) {
               <div class="totals-label">Total Amount</div>
               <div class="totals-value">${formatINR(totals.total || 0)}</div>
             </div>
+            <div class="totals-row balance">
+              <div class="totals-label">Balance Due</div>
+              <div class="totals-value">${formatINR(totals.total || 0)}</div>
+            </div>
           </div>
         </div>
       </div>
     </div>
 
+    <!-- Terms and Conditions -->
+    <div class="section">
+      <div class="section-header">TERMS AND CONDITIONS</div>
+      <div class="section-body compact">
+        <div class="terms-text">
+          <p>As per Agreement</p>
+          <p>* Reverse Charge Mechanism not applicable</p>
+        </div>
+      </div>
+    </div>
+
     <!-- Footer -->
-    <div class="footer">
-      Invoice generated on Hourly.Design
+    <div class="footer" style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+      <span>INVOICE GENERATED ON</span>
+      <a href="https://hourly.design" target="_blank" style="display: flex; align-items: center; text-decoration: none;">
+        ${logoBase64 ? `<img src="data:image/png;base64,${logoBase64}" style="height: 14pt; width: auto; vertical-align: middle;" alt="Hourly" />` : '<span style="color: #2d3748; font-weight: 700;">HOURLY.DESIGN</span>'}
+      </a>
     </div>
   </div>
 </body>

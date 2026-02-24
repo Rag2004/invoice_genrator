@@ -7,11 +7,11 @@ export default function ScopeDetails({ invoice, updateInvoice }) {
     const id = Date.now();
     const newStage = {
       id,
-      stage: `Stage ${stages.length + 1}`,
+      stage: '',
       percentage: '',
       days: '',
       subStages: [
-        { id: `${id}_1`, label: 'Concept Design' },
+        { id: `${id}_1`, label: 'Task 1' },
       ],
     };
     updateInvoice({ stages: [...stages, newStage] });
@@ -33,12 +33,13 @@ export default function ScopeDetails({ invoice, updateInvoice }) {
     const updated = stages.map((stage) => {
       if (stage.id !== stageId) return stage;
       const subStages = stage.subStages || [];
-      const newId = `${stageId}_${subStages.length + 1}`;
+      const nextNum = subStages.length + 1;
+      const newId = `${stageId}_${Date.now()}`;
       return {
         ...stage,
         subStages: [
           ...subStages,
-          { id: newId, label: `Task ${subStages.length + 1}` },
+          { id: newId, label: `Task ${nextNum}` },
         ],
       };
     });
@@ -62,7 +63,16 @@ export default function ScopeDetails({ invoice, updateInvoice }) {
       const filtered = (stage.subStages || []).filter(
         (sub) => String(sub.id) !== String(subId)
       );
-      return { ...stage, subStages: filtered };
+      // Auto-renumber: update labels to Task 1, Task 2, Task 3, ...
+      const renumbered = filtered.map((sub, idx) => {
+        // Only renumber if label matches the "Task N" pattern
+        const isDefaultLabel = /^Task \d+$/.test(sub.label || '');
+        return {
+          ...sub,
+          label: isDefaultLabel ? `Task ${idx + 1}` : sub.label,
+        };
+      });
+      return { ...stage, subStages: renumbered };
     });
     updateInvoice({ stages: updated });
   };
@@ -78,9 +88,7 @@ export default function ScopeDetails({ invoice, updateInvoice }) {
         <div className="work-section-title-block">
           <h3 className="work-section-title">Stages &amp; Sub-Stages</h3>
           <p className="work-section-subtitle">
-            Configure stages (e.g. “Stage 1 – 30%”) and sub-stages
-            (Concept Design, Final Design, GFCs, etc.). These become columns in
-            the Team table above.
+            Define stages and tasks. These become columns in the billing table.
           </p>
         </div>
         <button
@@ -98,136 +106,91 @@ export default function ScopeDetails({ invoice, updateInvoice }) {
         </div>
       )}
 
-      {stages.map((stage) => (
-        <div key={stage.id} className="card mb-2" style={{ padding: '16px' }}>
-          {/* Stage header row */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '2.3fr 1fr 1fr 40px',
-              gap: '12px',
-              alignItems: 'flex-end',
-              marginBottom: '10px',
-            }}
-          >
-            <div>
-              <label className="label">Stage Title</label>
-              <input
-                className="input"
-                type="text"
-                placeholder="Stage 1 - 30%"
-                value={stage.stage || ''}
-                onChange={(e) =>
-                  updateStageField(stage.id, 'stage', e.target.value)
-                }
-              />
-            </div>
-
-            <div>
-              <label className="label">Percentage (optional)</label>
-              <input
-                className="input"
-                type="text"
-                placeholder="30%"
-                value={stage.percentage || ''}
-                onChange={(e) =>
-                  updateStageField(stage.id, 'percentage', e.target.value)
-                }
-              />
-            </div>
-
-            <div>
-              <label className="label">Days (optional)</label>
-              <input
-                className="input"
-                type="number"
-                min="0"
-                placeholder="e.g. 10"
-                value={stage.days || ''}
-                onChange={(e) =>
-                  updateStageField(stage.id, 'days', e.target.value)
-                }
-              />
-            </div>
-
-            <div style={{ textAlign: 'right' }}>
-              <button
-                className="btn btn-ghost btn-sm"
-                type="button"
-                onClick={() => removeStage(stage.id)}
-                title="Remove entire stage"
-              >
-                🗑️
-              </button>
-            </div>
+      {stages.map((stage, stageIdx) => (
+        <div key={stage.id} className="stage-card">
+          {/* Compact stage header */}
+          <div className="stage-header-row">
+            <span className="stage-number">{stageIdx + 1}</span>
+            <input
+              className="stage-title-input"
+              type="text"
+              placeholder="Stage title"
+              value={stage.stage || ''}
+              onChange={(e) =>
+                updateStageField(stage.id, 'stage', e.target.value)
+              }
+            />
+            <input
+              className="stage-meta-input"
+              type="text"
+              placeholder="Perce"
+              value={stage.percentage || ''}
+              onChange={(e) =>
+                updateStageField(stage.id, 'percentage', e.target.value)
+              }
+            />
+            <input
+              className="stage-meta-input"
+              type="text"
+              placeholder="Days"
+              value={stage.days || ''}
+              onChange={(e) =>
+                updateStageField(stage.id, 'days', e.target.value)
+              }
+            />
+            <button
+              className="stage-delete-btn"
+              type="button"
+              onClick={() => removeStage(stage.id)}
+              title="Remove stage"
+            >
+              🗑️
+            </button>
           </div>
 
-          {/* Sub-stages table */}
-          <div className="work-table-wrapper" style={{ boxShadow: 'none' }}>
-            <table className="work-table">
-              <thead>
-                <tr>
-                  <th>Sub-Stage / Task</th>
-                  <th style={{ width: '40px' }} />
-                </tr>
-              </thead>
-              <tbody>
-                {(stage.subStages || []).map((sub) => (
-                  <tr key={sub.id}>
-                    <td>
-                      <input
-                        className="input"
-                        type="text"
-                        placeholder="Concept Design"
-                        value={sub.label || ''}
-                        onChange={(e) =>
-                          updateSubStage(
-                            stage.id,
-                            sub.id,
-                            'label',
-                            e.target.value
-                          )
-                        }
-                      />
-                    </td>
-                    <td className="work-cell-icon">
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        type="button"
-                        onClick={() => removeSubStage(stage.id, sub.id)}
-                        title="Remove sub-stage"
-                      >
-                        🗑️
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          {/* Task chips */}
+          <div className="task-chips-row">
+            {(stage.subStages || []).map((sub, subIdx) => (
+              <div key={sub.id} className="task-chip">
+                <span className="task-chip-number">{subIdx + 1}</span>
+                <input
+                  className="task-chip-input"
+                  type="text"
+                  placeholder={`Task ${subIdx + 1}`}
+                  value={sub.label || ''}
+                  onChange={(e) =>
+                    updateSubStage(stage.id, sub.id, 'label', e.target.value)
+                  }
+                />
+                <button
+                  className="task-chip-remove"
+                  type="button"
+                  onClick={() => removeSubStage(stage.id, sub.id)}
+                  title="Remove task"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+            <button
+              className="task-add-btn"
+              type="button"
+              onClick={() => addSubStage(stage.id)}
+            >
+              + Add
+            </button>
           </div>
-
-          <button
-            className="btn btn-ghost btn-sm mt-2"
-            type="button"
-            onClick={() => addSubStage(stage.id)}
-          >
-            + Add Sub-Stage
-          </button>
         </div>
       ))}
 
-      <div className="scope-footer">
-        <p className="muted">
-          Stages and sub-stages define how hours are distributed in the table
-          above. You can keep days &amp; percentage for internal planning.
-        </p>
-        {stages.length > 0 && (
+      {stages.length > 0 && (
+        <div className="scope-footer">
           <div className="scope-total-days">
-            <span className="scope-total-label">Total Days (all stages):</span>
+            <span className="scope-total-label">Total Days:</span>
             <span className="scope-total-value">{totalDays}</span>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,7 +1,8 @@
 
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import InvoiceComplete from './InvoiceComplete';
 import { buildInvoiceSnapshot } from '../utils/buildInvoiceSnapshot';
+import { downloadInvoicePDFFromServer } from '../api/api';
 
 /**
  * ============================================================================
@@ -26,6 +27,7 @@ export default function InvoicePreviewModal({
   logoUrl = ""
 }) {
   const modalRef = useRef(null);
+  const [downloading, setDownloading] = useState(false);
 
   // ============================================================================
   // KEYBOARD SHORTCUTS
@@ -76,6 +78,27 @@ export default function InvoicePreviewModal({
 
   // ============================================================================
   // ============================================================================
+  // DOWNLOAD PDF (Server-side Puppeteer for finalized invoices)
+  // ============================================================================
+  const handleDownload = async () => {
+    try {
+      setDownloading(true);
+      const invoiceNumber = snapshot.meta?.invoiceNumber || invoice.invoiceNumber || 'INVOICE';
+      const invoiceId = invoice.id || invoice.invoiceId || snapshot.meta?.invoiceId;
+
+      if (!invoiceId) {
+        alert('Cannot download PDF: Invoice has not been saved yet.');
+        return;
+      }
+
+      await downloadInvoicePDFFromServer(invoiceId, `${invoiceNumber}.pdf`);
+    } catch (err) {
+      console.error('❌ PDF download failed:', err);
+      alert(`Failed to download PDF: ${err.message}`);
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   // ============================================================================
   // RENDER
@@ -167,21 +190,39 @@ export default function InvoicePreviewModal({
             zIndex: 10
           }}
         >
-          <button
-            onClick={onClose}
-            style={{
-              padding: '10px 24px',
-              backgroundColor: '#6366f1',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              fontSize: '14px',
-              fontWeight: '600',
-              cursor: 'pointer'
-            }}
-          >
-            Close Preview
-          </button>
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <button
+              onClick={handleDownload}
+              disabled={downloading}
+              style={{
+                padding: '10px 24px',
+                backgroundColor: downloading ? '#a5b4fc' : '#10b981',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                fontSize: '14px',
+                fontWeight: '600',
+                cursor: downloading ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {downloading ? '⏳ Generating PDF...' : '📥 Download PDF'}
+            </button>
+            <button
+              onClick={onClose}
+              style={{
+                padding: '10px 24px',
+                backgroundColor: '#6366f1',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                fontSize: '14px',
+                fontWeight: '600',
+                cursor: 'pointer'
+              }}
+            >
+              Close Preview
+            </button>
+          </div>
         </div>
       </div>
     </div>

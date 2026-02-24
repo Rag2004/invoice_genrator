@@ -1,1 +1,2 @@
-export const LOGO_URL = `${window.location.origin}/logo.png`;
+import logo from '../assets/1.png';
+export const LOGO_URL = logo;

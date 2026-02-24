@@ -11,7 +11,7 @@ const logger = require('./logger');
 async function generateInvoicePDF(invoiceHTML, invoice = {}) {
   let browser;
   let page;
-  
+
   try {
     console.log('📄 Starting PDF generation...');
     console.log('   Invoice:', invoice?.invoiceNumber || 'DRAFT');
@@ -20,9 +20,9 @@ async function generateInvoicePDF(invoiceHTML, invoice = {}) {
     if (!invoiceHTML) {
       throw new Error('No HTML content provided for PDF generation');
     }
-    
+
     console.log('🔄 Launching headless browser (Windows mode)...');
-    
+
     // Windows-specific Puppeteer settings
     browser = await puppeteer.launch({
       headless: 'new',
@@ -50,7 +50,7 @@ async function generateInvoicePDF(invoiceHTML, invoice = {}) {
     // Create new page
     page = await browser.newPage();
     console.log('✅ Page created');
-    
+
     // Set viewport
     await page.setViewport({
       width: 1200,
@@ -60,7 +60,11 @@ async function generateInvoicePDF(invoiceHTML, invoice = {}) {
     console.log('✅ Viewport set');
 
     // Prepare full HTML document
-    const fullHTML = `
+    // If invoiceHTML is already a complete document, use it directly
+    const isCompleteDoc = invoiceHTML.trim().toLowerCase().startsWith('<!doctype')
+      || invoiceHTML.trim().toLowerCase().startsWith('<html');
+
+    const fullHTML = isCompleteDoc ? invoiceHTML.trim() : `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -109,13 +113,13 @@ async function generateInvoicePDF(invoiceHTML, invoice = {}) {
     `.trim();
 
     console.log('📝 Loading HTML into page...');
-    
+
     // Set content with shorter timeout for Windows
     await page.setContent(fullHTML, {
       waitUntil: 'domcontentloaded', // Less strict than 'networkidle0'
       timeout: 15000, // 15 seconds
     });
-    
+
     console.log('✅ HTML loaded');
 
     // Small delay for rendering
@@ -123,7 +127,7 @@ async function generateInvoicePDF(invoiceHTML, invoice = {}) {
     console.log('✅ Content settled');
 
     console.log('📋 Generating PDF...');
-    
+
     // Generate PDF
     const pdfBuffer = await page.pdf({
       format: 'A4',
@@ -148,7 +152,7 @@ async function generateInvoicePDF(invoiceHTML, invoice = {}) {
     await page.close();
     await browser.close();
     console.log('✅ Browser closed');
-    
+
     logger.info({
       invoiceNumber: invoice?.invoiceNumber || 'DRAFT',
       projectCode: invoice?.projectCode || 'N/A',
@@ -162,7 +166,7 @@ async function generateInvoicePDF(invoiceHTML, invoice = {}) {
     console.error('❌ PDF generation failed!');
     console.error('   Error:', error.message);
     console.error('   Type:', error.constructor.name);
-    
+
     // Better error messages
     if (error.message.includes('Target closed')) {
       console.error('   Cause: Browser connection lost (common on Windows)');
@@ -174,7 +178,7 @@ async function generateInvoicePDF(invoiceHTML, invoice = {}) {
       console.error('   Cause: Could not start Chrome');
       console.error('   Fix: Reinstall puppeteer: npm install puppeteer');
     }
-    
+
     // Clean up on error
     try {
       if (page) await page.close();
@@ -183,13 +187,13 @@ async function generateInvoicePDF(invoiceHTML, invoice = {}) {
     } catch (cleanupError) {
       console.error('⚠️  Cleanup error (ignored):', cleanupError.message);
     }
-    
-    logger.error({ 
+
+    logger.error({
       error: error.message,
       stack: error.stack,
       invoiceNumber: invoice?.invoiceNumber || 'DRAFT',
     }, 'PDF generation failed');
-    
+
     throw new Error(`PDF generation failed: ${error.message}`);
   }
 }
@@ -199,38 +203,38 @@ async function generateInvoicePDF(invoiceHTML, invoice = {}) {
  */
 async function testPuppeteer() {
   let browser;
-  
+
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       console.log(`🧪 Testing Puppeteer (attempt ${attempt}/3)...`);
-      
+
       browser = await puppeteer.launch({
         headless: 'new',
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
         timeout: 30000,
       });
-      
+
       const page = await browser.newPage();
       await page.setContent('<html><body><h1>Test</h1></body></html>', {
         waitUntil: 'domcontentloaded',
         timeout: 10000,
       });
-      
-      const pdf = await page.pdf({ 
+
+      const pdf = await page.pdf({
         format: 'A4',
         timeout: 10000,
       });
-      
+
       await page.close();
       await browser.close();
-      
+
       console.log('✅ Puppeteer test passed!');
       console.log(`   Generated ${pdf.length} bytes`);
       return true;
-      
+
     } catch (error) {
       console.error(`❌ Test attempt ${attempt} failed:`, error.message);
-      
+
       if (browser) {
         try {
           await browser.close();
@@ -238,19 +242,19 @@ async function testPuppeteer() {
           // Ignore cleanup errors
         }
       }
-      
+
       if (attempt === 3) {
         console.error('❌ All Puppeteer test attempts failed');
         console.error('   PDF generation may not work reliably');
         return false;
       }
-      
+
       // Wait before retry
       console.log(`   Retrying in 2 seconds...`);
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
   }
-  
+
   return false;
 }
 

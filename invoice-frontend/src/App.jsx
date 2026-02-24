@@ -1,7 +1,7 @@
 
-// src/App.jsx - FIXED VERSION
+// src/App.jsx - Data Router version (supports useBlocker)
 import React from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { createBrowserRouter, RouterProvider, Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import ProtectedRoute from './components/Auth/ProtectedRoute';
 
@@ -19,7 +19,6 @@ import ProfilePage from './pages/ProfilePage';
 
 // Invoice Pages
 import InvoiceApp from './InvoiceApp';
-// ✅ ADD THIS: Create InvoiceViewerPage for final invoices
 import InvoiceViewerPage from './pages/InvoiceViewPage';
 
 import { ToastContainer } from 'react-toastify';
@@ -27,22 +26,8 @@ import 'react-toastify/dist/ReactToastify.css';
 
 import './styles/Dashboard.css';
 
-export default function App() {
-  const { isAuthenticated, loading } = useAuth();
-
-  if (loading) {
-    return (
-      <div style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}>
-        <div>Loading app...</div>
-      </div>
-    );
-  }
-
+// Root layout that renders ToastContainer + child routes
+function RootLayout() {
   return (
     <>
       <ToastContainer
@@ -56,49 +41,89 @@ export default function App() {
         pauseOnHover={false}
         theme="light"
       />
-      <Routes>
-        {/* Auth Routes */}
-        <Route
-          path="/login"
-          element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <LoginPage />}
-        />
-        <Route
-          path="/verify-otp"
-          element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <VerifyOTPPage />}
-        />
-        <Route
-          path="/setup-profile"
-          element={<ProtectedRoute><ProfileSetupPage /></ProtectedRoute>}
-        />
-
-        {/* Dashboard Routes */}
-        <Route
-          path="/dashboard"
-          element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}
-        >
-          <Route index element={<DashboardHome />} />
-
-          {/* ✅ Invoice Routes - FIXED */}
-          <Route path="create-invoice" element={<InvoiceApp />} />
-          <Route path="create-invoice/:invoiceId" element={<InvoiceApp />} /> {/* Edit draft */}
-          <Route path="invoice/:invoiceId" element={<InvoiceViewerPage />} /> {/* ✅ NEW: View final */}
-
-          {/* Other Dashboard Routes */}
-          <Route path="invoices" element={<InvoiceListPage />} />
-          <Route path="drafts" element={<DraftsPage />} />
-          <Route path="profile" element={<ProfilePage />} />
-        </Route>
-
-        {/* Root & Fallback */}
-        <Route
-          path="/"
-          element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />}
-        />
-        <Route
-          path="*"
-          element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />}
-        />
-      </Routes>
+      <Outlet />
     </>
   );
+}
+
+// Auth guard components (use hooks inside route elements)
+function AuthRedirect({ children }) {
+  const { isAuthenticated } = useAuth();
+  return isAuthenticated ? <Navigate to="/dashboard" replace /> : children;
+}
+
+function RootRedirect() {
+  const { isAuthenticated } = useAuth();
+  return isAuthenticated ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />;
+}
+
+function LoadingGate({ children }) {
+  const { loading } = useAuth();
+  if (loading) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}>
+        <div>Loading app...</div>
+      </div>
+    );
+  }
+  return children;
+}
+
+// Wrap everything in a loading gate
+function RootWithLoading() {
+  return (
+    <LoadingGate>
+      <RootLayout />
+    </LoadingGate>
+  );
+}
+
+const router = createBrowserRouter([
+  {
+    path: '/',
+    element: <RootWithLoading />,
+    children: [
+      // Auth Routes
+      {
+        path: 'login',
+        element: <AuthRedirect><LoginPage /></AuthRedirect>,
+      },
+      {
+        path: 'verify-otp',
+        element: <AuthRedirect><VerifyOTPPage /></AuthRedirect>,
+      },
+      {
+        path: 'setup-profile',
+        element: <ProtectedRoute><ProfileSetupPage /></ProtectedRoute>,
+      },
+
+      // Dashboard Routes
+      {
+        path: 'dashboard',
+        element: <ProtectedRoute><DashboardLayout /></ProtectedRoute>,
+        children: [
+          { index: true, element: <DashboardHome /> },
+          { path: 'create-invoice', element: <InvoiceApp /> },
+          { path: 'create-invoice/:invoiceId', element: <InvoiceApp /> },
+          { path: 'invoice/:invoiceId', element: <InvoiceViewerPage /> },
+          { path: 'invoices', element: <InvoiceListPage /> },
+          { path: 'drafts', element: <DraftsPage /> },
+          { path: 'profile', element: <ProfilePage /> },
+        ],
+      },
+
+      // Root & Fallback
+      { index: true, element: <RootRedirect /> },
+      { path: '*', element: <RootRedirect /> },
+    ],
+  },
+]);
+
+export default function AppRouter() {
+  return <RouterProvider router={router} />;
 }

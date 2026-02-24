@@ -1,11 +1,44 @@
 
-// src/components/Dashboard/DashboardLayout.jsx
+// src/components/Dashboard/DashboardLayout.jsx — Clean White+Blue Theme
 import React, { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { LOGO_URL } from "../../config/branding";
-
+import { LOGO_URL } from '../../config/branding';
 import '../../styles/Dashboard.css';
+
+// SVG icons for nav items (cleaner than emoji)
+const IconDashboard = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" />
+    <rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />
+  </svg>
+);
+const IconCreate = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 5v14M5 12h14" />
+  </svg>
+);
+const IconList = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" />
+  </svg>
+);
+const IconProfile = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
+  </svg>
+);
+const IconLogout = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
+  </svg>
+);
+const IconChevron = ({ open }) => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+    style={{ transform: open ? 'none' : 'rotate(180deg)', transition: 'transform 0.2s' }}>
+    <polyline points="15 18 9 12 15 6" />
+  </svg>
+);
 
 export default function DashboardLayout() {
   const { user, logout } = useAuth();
@@ -21,18 +54,14 @@ export default function DashboardLayout() {
   };
 
   const menuItems = [
-    { path: '/dashboard', icon: '📊', label: 'Dashboard', exact: true },
-    { path: '/dashboard/create-invoice', icon: '📄', label: 'Create Invoice' },
-    { path: '/dashboard/invoices', icon: '📋', label: 'My Invoices' },
-    { path: '/dashboard/profile', icon: '👤', label: 'Profile' },
+    { path: '/dashboard', icon: <IconDashboard />, label: 'Dashboard', exact: true },
+    { path: '/dashboard/create-invoice', icon: <IconCreate />, label: 'Create Invoice' },
+    { path: '/dashboard/invoices', icon: <IconList />, label: 'My Invoices' },
+    { path: '/dashboard/profile', icon: <IconProfile />, label: 'Profile' },
   ];
 
-  const isActive = (path, exact = false) => {
-    if (exact) {
-      return location.pathname === path;
-    }
-    return location.pathname.startsWith(path);
-  };
+  const isActive = (path, exact = false) =>
+    exact ? location.pathname === path : location.pathname.startsWith(path);
 
   const getPageTitle = () => {
     if (location.pathname === '/dashboard') return 'Dashboard';
@@ -48,118 +77,41 @@ export default function DashboardLayout() {
     <div className="dashboard-container">
       {/* Sidebar */}
       <aside className={`dashboard-sidebar ${sidebarOpen ? 'open' : 'closed'}`}>
-        <div className="sidebar-header">
-          <div className="sidebar-logo">
-            <img 
-              src={LOGO_URL} 
-              alt="hourlx" 
-              className="logo-image"
-              style={{
-                width: sidebarOpen ? '40px' : '32px',
-                height: sidebarOpen ? '40px' : '32px',
-                transition: 'all 0.3s ease'
-              }}
-            />
-            {sidebarOpen && <span className="logo-text">hourlx</span>}
-          </div>
-          <button 
-            className="sidebar-toggle"
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            aria-label="Toggle sidebar"
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: '#9ca3af',
-              cursor: 'pointer',
-              fontSize: '16px',
-              padding: '8px',
-              borderRadius: '6px',
-              transition: 'all 0.2s'
-            }}
-            onMouseEnter={(e) => {
-              e.target.style.background = 'rgba(255, 255, 255, 0.1)';
-              e.target.style.color = '#fff';
-            }}
-            onMouseLeave={(e) => {
-              e.target.style.background = 'transparent';
-              e.target.style.color = '#9ca3af';
-            }}
-          >
-            {sidebarOpen ? '◀' : '▶'}
-          </button>
+        <div className="sidebar-header" style={{ justifyContent: sidebarOpen ? 'space-between' : 'center' }}>
+          <img src={LOGO_URL} alt="hourlx" className="logo-image" />
+          {sidebarOpen && (
+            <button className="sidebar-toggle" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle sidebar">
+              <IconChevron open={sidebarOpen} />
+            </button>
+          )}
         </div>
 
         <nav className="sidebar-nav">
-          {menuItems.map((item) => (
-            <button
-              key={item.path}
-              className={`nav-item ${isActive(item.path, item.exact) ? 'active' : ''}`}
-              onClick={() => navigate(item.path)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: sidebarOpen ? 'flex-start' : 'center',
-                gap: sidebarOpen ? '12px' : '0',
-                padding: sidebarOpen ? '12px 16px' : '12px',
-                margin: '4px 8px',
-                border: 'none',
-                borderRadius: '8px',
-                background: isActive(item.path, item.exact) ? '#6366f1' : 'transparent',
-                color: isActive(item.path, item.exact) ? '#fff' : '#9ca3af',
-                cursor: 'pointer',
-                fontSize: '14px',
-                fontWeight: isActive(item.path, item.exact) ? '600' : '500',
-                transition: 'all 0.2s',
-                width: 'calc(100% - 16px)'
-              }}
-              onMouseEnter={(e) => {
-                if (!isActive(item.path, item.exact)) {
-                  e.target.style.background = 'rgba(255, 255, 255, 0.1)';
-                  e.target.style.color = '#fff';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!isActive(item.path, item.exact)) {
-                  e.target.style.background = 'transparent';
-                  e.target.style.color = '#9ca3af';
-                }
-              }}
-            >
-              <span className="nav-icon" style={{ fontSize: '20px' }}>{item.icon}</span>
-              {sidebarOpen && <span className="nav-label">{item.label}</span>}
-            </button>
-          ))}
+          {menuItems.map((item) => {
+            const active = isActive(item.path, item.exact);
+            return (
+              <button
+                key={item.path}
+                className={`nav-item${active ? ' active' : ''}`}
+                onClick={() => navigate(item.path)}
+                title={!sidebarOpen ? item.label : undefined}
+                style={{ justifyContent: sidebarOpen ? 'flex-start' : 'center' }}
+              >
+                <span className="nav-icon">{item.icon}</span>
+                {sidebarOpen && <span className="nav-label">{item.label}</span>}
+              </button>
+            );
+          })}
         </nav>
 
         <div className="sidebar-footer">
-          <button 
-            className="nav-item logout-btn" 
+          <button
+            className="nav-item logout-btn"
             onClick={handleLogout}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: sidebarOpen ? 'flex-start' : 'center',
-              gap: sidebarOpen ? '12px' : '0',
-              padding: sidebarOpen ? '12px 16px' : '12px',
-              margin: '4px 8px',
-              border: 'none',
-              borderRadius: '8px',
-              background: 'transparent',
-              color: '#ef4444',
-              cursor: 'pointer',
-              fontSize: '14px',
-              fontWeight: '500',
-              transition: 'all 0.2s',
-              width: 'calc(100% - 16px)'
-            }}
-            onMouseEnter={(e) => {
-              e.target.style.background = 'rgba(239, 68, 68, 0.1)';
-            }}
-            onMouseLeave={(e) => {
-              e.target.style.background = 'transparent';
-            }}
+            title={!sidebarOpen ? 'Logout' : undefined}
+            style={{ justifyContent: sidebarOpen ? 'flex-start' : 'center' }}
           >
-            <span className="nav-icon" style={{ fontSize: '20px' }}>🚪</span>
+            <span className="nav-icon"><IconLogout /></span>
             {sidebarOpen && <span className="nav-label">Logout</span>}
           </button>
         </div>
@@ -170,54 +122,16 @@ export default function DashboardLayout() {
         {/* Top Header */}
         <header className="dashboard-header">
           <div className="header-left">
-            <h1 className="page-title" style={{
-              fontSize: '24px',
-              fontWeight: '700',
-              color: '#1f2937',
-              margin: 0
-            }}>
-              {getPageTitle()}
-            </h1>
+            <h1 className="page-title">{getPageTitle()}</h1>
           </div>
-
           <div className="header-right">
-            <div className="user-info" style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              padding: '8px 12px',
-              borderRadius: '12px',
-              background: '#f9fafb',
-              border: '1px solid #e5e7eb'
-            }}>
-              <div className="user-avatar" style={{
-                width: '40px',
-                height: '40px',
-                borderRadius: '50%',
-                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#fff',
-                fontSize: '16px',
-                fontWeight: '600'
-              }}>
+            <div className="user-info">
+              <div className="user-avatar">
                 {user?.name?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase() || 'U'}
               </div>
               <div className="user-details">
-                <div className="user-name" style={{
-                  fontSize: '14px',
-                  fontWeight: '600',
-                  color: '#1f2937'
-                }}>
-                  {user?.name || 'User'}
-                </div>
-                <div className="user-email" style={{
-                  fontSize: '12px',
-                  color: '#6b7280'
-                }}>
-                  {user?.email}
-                </div>
+                <div className="user-name">{user?.name || 'User'}</div>
+                <div className="user-email">{user?.email}</div>
               </div>
             </div>
           </div>

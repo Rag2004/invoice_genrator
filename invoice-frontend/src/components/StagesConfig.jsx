@@ -64,18 +64,18 @@ export default function StagesConfig({
     ...s,
     id: s.id || `stage_${stageIndex}`,
     subStages:
-      Array.isArray(s.subStages) && s.subStages.length
+      Array.isArray(s.subStages)
         ? s.subStages.map((sub, subIndex) => ({
           ...sub,
           id: sub.id || `${s.id || stageIndex}_sub_${subIndex}`
         }))
-        : [{ id: `${s.id || stageIndex}_sub_0`, label: s.stage || 'Task' }],
+        : [],
   }));
 
-  const hasStages = stages.length > 0;
-  const totalStageColumns = hasStages
-    ? stages.reduce((sum, st) => sum + (st.subStages ? st.subStages.length : 1), 0)
-    : 0;
+  // Filter stages to only those that have at least one substage for the table breakdown
+  const activeStages = stages.filter(st => st.subStages && st.subStages.length > 0);
+  const hasStages = activeStages.length > 0;
+  const totalStageColumns = activeStages.reduce((sum, st) => sum + st.subStages.length, 0);
 
   const calcTotalHoursFromMap = (stageHours = {}) => {
     let total = 0;
@@ -409,14 +409,34 @@ export default function StagesConfig({
       days: '',
       subStages: [{ id: `${id}_1`, label: 'Task 1' }],
     };
+
+    // Sync: add empty stageHours entries for the new stage in all existing items
+    const updatedItems = (invoice.items || []).map((item) => {
+      const stageHours = { ...(item.stageHours || {}) };
+      stageHours[String(id)] = { [`${id}_1`]: '' };
+      return { ...item, stageHours };
+    });
+
     updateInvoice({
       stages: [...(invoice.stages || []), newStage],
+      items: updatedItems,
     });
   };
 
   const removeStage = (id) => {
     const updated = (invoice.stages || []).filter((s) => s.id !== id);
-    updateInvoice({ stages: updated });
+
+    // Cleanup: remove stageHours entries for deleted stage from all items + recalc
+    const sid = String(id);
+    const updatedItems = (invoice.items || []).map((item) => {
+      const stageHours = { ...(item.stageHours || {}) };
+      delete stageHours[sid];
+      const totalHours = calcTotalHoursFromMap(stageHours);
+      const rate = item.rate || 0;
+      return { ...item, stageHours, hours: totalHours, amount: Math.round(rate * totalHours) };
+    });
+
+    updateInvoice({ stages: updated, items: updatedItems });
   };
 
   const updateStageField = (id, field, value) => {
@@ -447,16 +467,29 @@ export default function StagesConfig({
   };
 
   const addSubStage = (stageId) => {
-    const updated = (invoice.stages || []).map((stage) => {
+    let newSubId = '';
+    const updatedStages = (invoice.stages || []).map((stage) => {
       if (stage.id !== stageId) return stage;
       const subStages = stage.subStages || [];
-      const newId = `${stageId}_${subStages.length + 1}`;
+      const nextNum = subStages.length + 1;
+      newSubId = `${stageId}_${Date.now()}`;
       return {
         ...stage,
-        subStages: [...subStages, { id: newId, label: `Task ${subStages.length + 1}` }],
+        subStages: [...subStages, { id: newSubId, label: `Task ${nextNum}` }],
       };
     });
-    updateInvoice({ stages: updated });
+
+    // Sync: add empty hour entry for the new sub-stage in all existing items
+    const sid = String(stageId);
+    const updatedItems = (invoice.items || []).map((item) => {
+      const stageHours = { ...(item.stageHours || {}) };
+      const subMap = { ...(stageHours[sid] || {}) };
+      subMap[String(newSubId)] = '';
+      stageHours[sid] = subMap;
+      return { ...item, stageHours };
+    });
+
+    updateInvoice({ stages: updatedStages, items: updatedItems });
   };
 
   const updateSubStage = (stageId, subId, value) => {
@@ -474,9 +507,33 @@ export default function StagesConfig({
     const updated = (invoice.stages || []).map((stage) => {
       if (stage.id !== stageId) return stage;
       const filtered = (stage.subStages || []).filter((sub) => String(sub.id) !== String(subId));
-      return { ...stage, subStages: filtered };
+      // Auto-renumber: update labels to Task 1, Task 2, Task 3, ...
+      const renumbered = filtered.map((sub, idx) => {
+        const isDefaultLabel = /^Task \d+$/.test(sub.label || '');
+        return {
+          ...sub,
+          label: isDefaultLabel ? `Task ${idx + 1}` : sub.label,
+        };
+      });
+      return { ...stage, subStages: renumbered };
     });
-    updateInvoice({ stages: updated });
+
+    // Cleanup: remove sub-stage hour entries from all items + recalc
+    const sid = String(stageId);
+    const subKey = String(subId);
+    const updatedItems = (invoice.items || []).map((item) => {
+      const stageHours = { ...(item.stageHours || {}) };
+      if (stageHours[sid]) {
+        const subMap = { ...stageHours[sid] };
+        delete subMap[subKey];
+        stageHours[sid] = subMap;
+      }
+      const totalHours = calcTotalHoursFromMap(stageHours);
+      const rate = item.rate || 0;
+      return { ...item, stageHours, hours: totalHours, amount: Math.round(rate * totalHours) };
+    });
+
+    updateInvoice({ stages: updated, items: updatedItems });
   };
 
   const totalDays = (invoice.stages || []).reduce((sum, s) => sum + (Number(s.days || 0) || 0), 0);
@@ -530,7 +587,7 @@ export default function StagesConfig({
               <div className="stage-column-headers">
                 <span className="stage-col-spacer" />
                 <span className="stage-col-title">Stage Title</span>
-                <span className="stage-col-pct">Percentage</span>
+                <span className="stage-col-pct">Percentage Payment</span>
                 <span className="stage-col-days">Days</span>
                 <span className="stage-col-action" />
               </div>
@@ -556,7 +613,7 @@ export default function StagesConfig({
                             <input
                               className="input"
                               type="text"
-                              placeholder="Percentage"
+                              placeholder="%"
                               value={stage.percentage || ''}
                               onChange={(e) => updateStageField(stage.id, 'percentage', e.target.value)}
                             />
@@ -592,7 +649,7 @@ export default function StagesConfig({
                             <input
                               className="input"
                               type="text"
-                              placeholder="Task name"
+                              placeholder={`Task ${subIdx + 1}`}
                               value={sub.label || ''}
                               onChange={(e) => updateSubStage(stage.id, sub.id, e.target.value)}
                             />
@@ -762,7 +819,7 @@ export default function StagesConfig({
                     </tr>
                     {hasStages && (
                       <tr>
-                        {stages.map((st, stIdx) => {
+                        {activeStages.map((st, stIdx) => {
                           const sub = st.subStages || [];
                           const span = sub.length || 1;
                           return (
@@ -775,18 +832,11 @@ export default function StagesConfig({
                     )}
                     {hasStages && (
                       <tr>
-                        {stages.map((st, stIdx) => {
+                        {activeStages.map((st, stIdx) => {
                           const sub = st.subStages || [];
-                          if (sub.length === 0) {
-                            return (
-                              <th key={`sub-${st.id || stIdx}`} className="work-th-substage" style={{ minWidth: '70px' }}>
-                                {st.stage || 'Task'}
-                              </th>
-                            );
-                          }
                           return sub.map((subStage, subIdx) => (
                             <th key={`sub-${subStage.id || `${st.id || stIdx}-${subIdx}`}`} className="work-th-substage" style={{ minWidth: '70px' }}>
-                              {subStage.label || 'Task'}
+                              {subStage.label || `Task ${subIdx + 1}`}
                             </th>
                           ));
                         })}
@@ -828,50 +878,31 @@ export default function StagesConfig({
                               ))}
                             </select>
                           </td>
-                          {hasStages &&
-                            stages.map((st) => {
-                              const sid = String(st.id);
-                              const subMap = stageHours[sid] || {};
-                              const sub = st.subStages || [];
+                          {activeStages.map((st) => {
+                            const sid = String(st.id);
+                            const subMap = stageHours[sid] || {};
+                            const sub = st.subStages || [];
 
-                              if (sub.length === 0) {
-                                return (
-                                  <td key={`${item.id}-${sid}`} className="work-cell-narrow" style={{ minWidth: '70px' }}>
-                                    <input
-                                      type="number"
-                                      className="input"
-                                      min="0"
-                                      step="0.5"
-                                      value={subMap['__single'] ?? ''}
-                                      onChange={(e) =>
-                                        updateStageHours(item.id, st.id, '__single', e.target.value)
-                                      }
-                                      style={{ width: '60px', textAlign: 'center' }}
-                                    />
-                                  </td>
-                                );
-                              }
-
-                              return sub.map((subStage) => {
-                                const subId = String(subStage.id);
-                                return (
-                                  <td key={`${item.id}-${sid}-${subId}`} className="work-cell-narrow" style={{ minWidth: '70px' }}>
-                                    <input
-                                      type="number"
-                                      className="input"
-                                      min="0"
-                                      step="0.5"
-                                      placeholder="0"
-                                      value={subMap[subId] ?? ''}
-                                      onChange={(e) =>
-                                        updateStageHours(item.id, st.id, subStage.id, e.target.value)
-                                      }
-                                      style={{ width: '60px', textAlign: 'center' }}
-                                    />
-                                  </td>
-                                );
-                              });
-                            })}
+                            return sub.map((subStage) => {
+                              const subId = String(subStage.id);
+                              return (
+                                <td key={`${item.id}-${sid}-${subId}`} className="work-cell-narrow" style={{ minWidth: '70px' }}>
+                                  <input
+                                    type="number"
+                                    className="input"
+                                    min="0"
+                                    step="0.5"
+                                    placeholder="0"
+                                    value={subMap[subId] ?? ''}
+                                    onChange={(e) =>
+                                      updateStageHours(item.id, st.id, subStage.id, e.target.value)
+                                    }
+                                    style={{ width: '60px', textAlign: 'center' }}
+                                  />
+                                </td>
+                              );
+                            });
+                          })}
                           <td className="work-cell-narrow work-cell-hours" style={{ minWidth: '90px' }}>
                             <input type="text" className="input input-readonly" readOnly value={totalHours} style={{ width: '80px', textAlign: 'center' }} />
                           </td>

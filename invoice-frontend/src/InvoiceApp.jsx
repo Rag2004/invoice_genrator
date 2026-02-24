@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import './styles.css';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useBlocker } from 'react-router-dom';
 
 import StagesConfig from './components/StagesConfig';
 import InvoiceComplete from './components/InvoiceComplete';
@@ -140,7 +140,7 @@ const InfoBox = ({ label, value, loading }) => (
       color: loading ? "#9ca3af" : "#111827",
       fontWeight: 500,
     }}>
-      {loading ? "Loading..." : (value || "Will auto-fill")}
+      {loading ? "Loading..." : (value || "Auto fill")}
     </div>
   </div>
 );
@@ -154,6 +154,7 @@ export default function Invoice() {
   const navigate = useNavigate();
   const { invoiceId } = useParams();
   const invoiceRef = useRef(null);
+  const isBlockerSavingRef = useRef(false);
 
   const [teamOptions, setTeamOptions] = useState([]);
   const [projectData, setProjectData] = useState(null);
@@ -224,7 +225,8 @@ export default function Invoice() {
   useEffect(() => { isSavingRef.current = isSaving; }, [isSaving]);
 
   // Silent auto-save (no alerts, no validation popups)
-  const autoSaveDraft = useCallback(async () => {
+  // isExitSave = true shows a prominent popup (used when user navigates away)
+  const autoSaveDraft = useCallback(async (isExitSave = false) => {
     const inv = invoiceRef2.current;
     const usr = userRef.current;
 
@@ -289,12 +291,33 @@ export default function Invoice() {
           window.history.replaceState({}, '', `/dashboard/create-invoice/${result.invoiceId}`);
         }
         console.log('✅ Auto-saved draft');
-        toast.info('📝 Draft auto-saved', {
-          toastId: 'auto-save',
-          autoClose: 2000,
-          hideProgressBar: true,
-          position: 'bottom-right',
-        });
+
+        if (isExitSave) {
+          // 🔔 Prominent popup when user is leaving the page
+          toast.success('📝 Draft saved! Your invoice has been auto-saved as a draft.', {
+            toastId: 'auto-save-exit',
+            autoClose: 4000,
+            hideProgressBar: false,
+            position: 'top-center',
+            style: {
+              background: '#10b981',
+              color: '#fff',
+              fontWeight: 600,
+              fontSize: '15px',
+              borderRadius: '12px',
+              boxShadow: '0 8px 32px rgba(16, 185, 129, 0.35)',
+              padding: '14px 24px',
+            },
+          });
+        } else {
+          // Subtle background save notification
+          toast.info('📝 Draft auto-saved', {
+            toastId: 'auto-save',
+            autoClose: 2000,
+            hideProgressBar: true,
+            position: 'bottom-right',
+          });
+        }
       }
     } catch (err) {
       console.warn('⚠️ Auto-save failed:', err.message);
@@ -307,9 +330,11 @@ export default function Invoice() {
   useEffect(() => {
     const handleBeforeUnload = (e) => {
       autoSaveDraft();
-      // Show browser's native "Leave page?" prompt
-      e.preventDefault();
-      e.returnValue = '';
+      // Only show browser's native "Leave page?" prompt if there are unsaved changes
+      if (isDirtyRef.current) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
     };
 
     // 🔒 Save when tab becomes hidden (user switches tabs or minimizes)
@@ -335,7 +360,36 @@ export default function Invoice() {
     };
   }, [autoSaveDraft]);
 
-  // ⏱️ Debounced periodic auto-save (30s after last change)
+  // 🔒 Auto-save on component unmount (safety net)
+  useEffect(() => {
+    return () => {
+      autoSaveDraft(true);
+    };
+  }, [autoSaveDraft]);
+
+  // 🔒 React Router navigation guard — catches sidebar clicks, in-app navigate()
+  const blocker = useBlocker(() => {
+    // Block navigation if there are unsaved changes
+    return isDirtyRef.current && invoiceRef2.current.status !== 'FINAL';
+  });
+
+  useEffect(() => {
+    if (blocker.state === 'blocked') {
+      // Auto-save the draft before allowing navigation
+      isBlockerSavingRef.current = true;
+      autoSaveDraft(true).then(() => {
+        isBlockerSavingRef.current = false;
+        // Proceed with navigation after save completes
+        blocker.proceed();
+      }).catch(() => {
+        isBlockerSavingRef.current = false;
+        // Still proceed even if save fails — don't trap the user
+        blocker.proceed();
+      });
+    }
+  }, [blocker, autoSaveDraft]);
+
+  // ⏱️ Debounced periodic auto-save (5s after last change)
   useEffect(() => {
     if (invoice.status === 'FINAL') return;
     if (!invoice.projectCode) return;
@@ -343,12 +397,26 @@ export default function Invoice() {
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => {
       autoSaveDraft();
-    }, 30000);
+    }, 5000);
 
     return () => {
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     };
   }, [invoice, autoSaveDraft]);
+
+  // 🔒 UNSAVED CHANGES — conditionally warn on tab close/refresh
+  const isDirtyRef = useRef(false);
+  useEffect(() => {
+    if (invoice.status === 'FINAL' || !invoice.projectCode) {
+      isDirtyRef.current = false;
+      return;
+    }
+    const currentSnapshot = JSON.stringify({
+      projectCode: invoice.projectCode, notes: invoice.notes, date: invoice.date,
+      stages: invoice.stages, items: invoice.items?.map(i => ({ memberId: i.memberId, mode: i.mode, stageHours: i.stageHours })),
+    });
+    isDirtyRef.current = currentSnapshot !== lastSavedRef.current;
+  }, [invoice]);
 
   /* ============================================================================
      ✅ LOAD TEAM OPTIONS - Now stores all rows and groups by member name
@@ -991,6 +1059,20 @@ export default function Invoice() {
 
   const handleShare = async (email) => {
 
+    // ✅ STEP 1: Finalize the invoice first (if not already finalized)
+    if (invoice.status !== 'FINAL') {
+      try {
+        await handleSaveFinalInvoice();
+        // Wait a moment for state to update after finalization
+        await new Promise(resolve => setTimeout(resolve, 500));
+      } catch (err) {
+        console.error('❌ Failed to finalize before sharing:', err);
+        alert('❌ Failed to finalize invoice before sharing. Please try again.');
+        return;
+      }
+    }
+
+    // ✅ STEP 2: Share the invoice
     await new Promise(resolve => setTimeout(resolve, 100));
 
     if (!invoiceRef.current) {
@@ -1020,9 +1102,33 @@ export default function Invoice() {
       });
 
       if (result.hasPDF) {
-        alert(`✅ Invoice sent as PDF to ${email}!\n\nFilename: ${result.filename}`);
+        toast.success(`✅ Invoice finalized & sent as PDF to ${email}!`, {
+          autoClose: 4000,
+          position: 'top-center',
+          style: {
+            background: '#10b981',
+            color: '#fff',
+            fontWeight: 600,
+            fontSize: '15px',
+            borderRadius: '12px',
+            boxShadow: '0 8px 32px rgba(16, 185, 129, 0.35)',
+            padding: '14px 24px',
+          },
+        });
       } else {
-        alert(`✅ Invoice sent to ${email}!`);
+        toast.success(`✅ Invoice finalized & sent to ${email}!`, {
+          autoClose: 4000,
+          position: 'top-center',
+          style: {
+            background: '#10b981',
+            color: '#fff',
+            fontWeight: 600,
+            fontSize: '15px',
+            borderRadius: '12px',
+            boxShadow: '0 8px 32px rgba(16, 185, 129, 0.35)',
+            padding: '14px 24px',
+          },
+        });
       }
 
       setIsShareDialogOpen(false);
@@ -1072,8 +1178,6 @@ export default function Invoice() {
         flexDirection: "column",
         gap: "16px",
         marginBottom: "24px",
-        maxWidth: "1200px",
-        margin: "0 auto",
         padding: "20px"
       }}>
         {/* Page Title */}
@@ -1116,14 +1220,40 @@ export default function Invoice() {
             <div className="rigid-data-box">
               <div className="rigid-label">Invoice Number</div>
               <div className="rigid-value">
-                {invoice.invoiceNumber || "Will auto-fill"}
+                {invoice.invoiceNumber || "Auto fill"}
               </div>
             </div>
 
             {/* Invoice Date */}
             <div className="rigid-data-box">
               <div className="rigid-label">Invoice Date</div>
-              <div className="rigid-value">{formatDate(invoice.date)}</div>
+              <div className="rigid-value" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div className="date-input-wrapper" style={{ flex: 1 }}>
+                  <input
+                    className="input"
+                    type="date"
+                    value={invoice.date || ''}
+                    onChange={(e) => updateInvoice({ date: e.target.value })}
+                    style={{ fontSize: '0.875rem', padding: '6px 36px 6px 10px', border: '1px solid #e5e7eb', borderRadius: '6px' }}
+                  />
+                  <span
+                    className="date-icon"
+                    onClick={(e) => {
+                      const input = e.currentTarget.parentElement.querySelector('input');
+                      if (input?.showPicker) input.showPicker();
+                      else input?.focus();
+                    }}
+                    title="Open calendar"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                      <line x1="16" y1="2" x2="16" y2="6" />
+                      <line x1="8" y1="2" x2="8" y2="6" />
+                      <line x1="3" y1="10" x2="21" y2="10" />
+                    </svg>
+                  </span>
+                </div>
+              </div>
             </div>
 
             {/* Empty third column for 3-column consistency */}
@@ -1157,7 +1287,7 @@ export default function Invoice() {
             <div className="rigid-data-box">
               <div className="rigid-label">Consultant ID (Auto)</div>
               <div className="rigid-value">
-                {loadingProject ? "Loading..." : (invoice.consultantId || "Will auto-fill")}
+                {loadingProject ? "Loading..." : (invoice.consultantId || "Auto fill")}
               </div>
             </div>
 
@@ -1165,7 +1295,7 @@ export default function Invoice() {
             <div className="rigid-data-box">
               <div className="rigid-label">Client ID (Auto)</div>
               <div className="rigid-value">
-                {loadingProject ? "Loading..." : (invoice.clientCode || "Will auto-fill")}
+                {loadingProject ? "Loading..." : (invoice.clientCode || "Auto fill")}
               </div>
             </div>
           </div>
@@ -1182,14 +1312,14 @@ export default function Invoice() {
             <div className="rigid-data-box">
               <div className="rigid-label">Consultant Name</div>
               <div className="rigid-value">
-                {loadingProject ? "Loading..." : (invoice.consultantName || "Will auto-fill")}
+                {loadingProject ? "Loading..." : (invoice.consultantName || "Auto fill")}
               </div>
             </div>
 
             <div className="rigid-data-box">
               <div className="rigid-label">Consultant Email</div>
               <div className="rigid-value">
-                {loadingProject ? "Loading..." : (invoice.consultantEmail || "Will auto-fill")}
+                {loadingProject ? "Loading..." : (invoice.consultantEmail || "Auto fill")}
               </div>
             </div>
 
@@ -1213,21 +1343,21 @@ export default function Invoice() {
             <div className="rigid-data-box">
               <div className="rigid-label">Client Name</div>
               <div className="rigid-value">
-                {loadingProject ? "Loading..." : (invoice.clientName || "Will auto-fill")}
+                {loadingProject ? "Loading..." : (invoice.clientName || "Auto fill")}
               </div>
             </div>
 
             <div className="rigid-data-box">
               <div className="rigid-label">Business Name</div>
               <div className="rigid-value">
-                {loadingProject ? "Loading..." : (invoice.businessName || "Will auto-fill")}
+                {loadingProject ? "Loading..." : (invoice.businessName || "Auto fill")}
               </div>
             </div>
 
             <div className="rigid-data-box">
               <div className="rigid-label">Billing Address</div>
               <div className="rigid-value">
-                {loadingProject ? "Loading..." : (invoice.billingAddress || "Will auto-fill")}
+                {loadingProject ? "Loading..." : (invoice.billingAddress || "Auto fill")}
               </div>
             </div>
           </div>
@@ -1244,14 +1374,14 @@ export default function Invoice() {
             <div className="rigid-data-box">
               <div className="rigid-label">Hourly Rate (From Project)</div>
               <div className="rigid-value">
-                {loadingProject ? "Loading..." : (invoice.baseHourlyRate ? formatINR(invoice.baseHourlyRate) : "Will auto-fill")}
+                {loadingProject ? "Loading..." : (invoice.baseHourlyRate ? formatINR(invoice.baseHourlyRate) : "Auto fill")}
               </div>
             </div>
 
             <div className="rigid-data-box">
               <div className="rigid-label">Service Fee % (From Project)</div>
               <div className="rigid-value">
-                {loadingProject ? "Loading..." : (invoice.serviceFeePct ? `${invoice.serviceFeePct}%` : "Will auto-fill")}
+                {loadingProject ? "Loading..." : (invoice.serviceFeePct ? `${invoice.serviceFeePct}%` : "Auto fill")}
               </div>
             </div>
 
@@ -1510,18 +1640,6 @@ export default function Invoice() {
           <button className="btn btn-ghost" onClick={handlePreview}>
             📄 Preview
           </button>
-          <button
-            className="btn btn-ghost"
-            onClick={() => setIsShareDialogOpen(true)}
-            disabled={invoice.status !== 'FINAL'}
-            title={invoice.status !== 'FINAL' ? 'Please finalize the invoice first to share' : 'Share invoice via email'}
-            style={{
-              opacity: invoice.status !== 'FINAL' ? 0.5 : 1,
-              cursor: invoice.status !== 'FINAL' ? 'not-allowed' : 'pointer'
-            }}
-          >
-            ✉️ Share
-          </button>
         </div>
         <div className="right">
           <div style={{
@@ -1544,15 +1662,15 @@ export default function Invoice() {
           </button>
           <button
             className="btn btn-success"
-            onClick={handleSaveFinalInvoice}
-            disabled={isSaving || invoice.status === 'FINAL'}
-            title={invoice.status === 'FINAL' ? 'Invoice already finalized' : 'Finalize and save invoice'}
+            onClick={() => setIsShareDialogOpen(true)}
+            disabled={isSaving}
+            title={invoice.status === 'FINAL' ? 'Share finalized invoice' : 'Finalize & share invoice via email'}
           >
             {isSaving
-              ? '⏳ Saving...'
+              ? '⏳ Processing...'
               : invoice.status === 'FINAL'
-                ? '✅ Finalized'
-                : '✅ Save Invoice'}
+                ? '✉️ Share Invoice'
+                : '✉️ Finalize & Share'}
           </button>
         </div>
       </div>

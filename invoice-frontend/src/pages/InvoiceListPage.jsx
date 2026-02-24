@@ -15,7 +15,7 @@
 //   const [allInvoices, setAllInvoices] = useState([]);
 //   const [search, setSearch] = useState("");
 //   const [activeFilter, setActiveFilter] = useState("all");
-  
+
 //   // Share state
 //   const [sharingInvoiceId, setSharingInvoiceId] = useState(null);
 //   const [shareError, setShareError] = useState(null);
@@ -29,7 +29,7 @@
 //         setError(null);
 
 //         const consultantId = user?.consultantId || user?.consultant_id || user?.id;
-        
+
 //         if (!consultantId) {
 //           console.error("❌ Missing consultant ID");
 //           setError("Authentication error: Missing consultant ID");
@@ -43,10 +43,10 @@
 
 //         const normalized = (result?.invoices || []).map((inv) => {
 //           let items = [];
-          
+
 //           try {
 //             const itemsData = inv.itemsJson || inv.items;
-            
+
 //             if (!itemsData) {
 //               items = [];
 //             } else if (typeof itemsData === 'string') {
@@ -92,7 +92,7 @@
 //         }
 //       } catch (err) {
 //         if (!mounted) return;
-        
+
 //         console.error("❌ Failed to load invoices:", err);
 
 //         if (err.message?.includes('403') || err.message?.includes('Access denied')) {
@@ -124,7 +124,7 @@
 
 //   // ✅ SIMPLIFIED AUTO-SHARE HANDLER
 //   const handleAutoShare = async (invoice) => {
-    
+
 //     // Confirm before sending
 //     const confirmed = window.confirm(
 //       `Send invoice ${invoice.invoiceNumber} to client?\n\n` +
@@ -151,14 +151,14 @@
 //     } catch (error) {
 //       console.error('❌ Share error:', error);
 //       setShareError(error.message);
-      
+
 //       let errorMessage = error.message;
-      
+
 //       // Provide helpful error messages
 //       if (errorMessage.includes('Client email not found')) {
 //         errorMessage += '\n\nPlease ensure the client email is added in the project setup.';
 //       }
-      
+
 //       alert(`❌ Failed to send invoice:\n\n${errorMessage}`);
 //     } finally {
 //       setSharingInvoiceId(null);
@@ -197,7 +197,7 @@
 //   };
 
 //   const handleViewInvoice = (invoice) => {
-    
+
 //     if (!invoice.id) {
 //       console.error('❌ Invalid invoice: missing ID', invoice);
 //       alert('Cannot open invoice: Invalid invoice ID');
@@ -254,7 +254,7 @@
 //           <div className="error-icon">⚠️</div>
 //           <h3>Failed to Load Invoices</h3>
 //           <p>{error}</p>
-          
+
 //           <div className="error-actions">
 //             <button 
 //               className="btn-primary" 
@@ -276,7 +276,7 @@
 
 //   return (
 //     <div className="invoice-list-page">
-      
+
 //       {error && allInvoices.length > 0 && (
 //         <div style={{
 //           background: '#fef3c7',
@@ -491,10 +491,35 @@
 // src/pages/InvoiceListPage.jsx - WITH SHARE DIALOG
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { listInvoices, autoShareInvoice, getInvoice } from "../api/api";
+import { listInvoices, autoShareInvoice, getInvoice, downloadInvoicePDFFromServer } from "../api/api";
 import { useAuth } from "../context/AuthContext";
 import ShareInvoiceDialog from "../components/ui/ShareInvoiceDialog";
 import "../styles/InvoiceList.css";
+
+// ── SVG Icons (matching Dashboard) ─────────────────────────
+const EyeIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
+  </svg>
+);
+const EditIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+  </svg>
+);
+const MailIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+    <polyline points="22,6 12,13 2,6" />
+  </svg>
+);
+const DownloadIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+  </svg>
+);
 
 export default function InvoiceListPage() {
   const navigate = useNavigate();
@@ -505,13 +530,14 @@ export default function InvoiceListPage() {
   const [allInvoices, setAllInvoices] = useState([]);
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState("all");
-  
+
   // Share dialog state
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [clientEmail, setClientEmail] = useState("");
   const [loadingEmail, setLoadingEmail] = useState(false);
   const [sharingInvoiceId, setSharingInvoiceId] = useState(null);
+  const [downloadingPdfId, setDownloadingPdfId] = useState(null);
 
   useEffect(() => {
     let mounted = true;
@@ -522,7 +548,7 @@ export default function InvoiceListPage() {
         setError(null);
 
         const consultantId = user?.consultantId || user?.consultant_id || user?.id;
-        
+
         if (!consultantId) {
           console.error("❌ Missing consultant ID");
           setError("Authentication error: Missing consultant ID");
@@ -536,10 +562,10 @@ export default function InvoiceListPage() {
 
         const normalized = (result?.invoices || []).map((inv) => {
           let items = [];
-          
+
           try {
             const itemsData = inv.itemsJson || inv.items;
-            
+
             if (!itemsData) {
               items = [];
             } else if (typeof itemsData === 'string') {
@@ -586,12 +612,12 @@ export default function InvoiceListPage() {
         }
       } catch (err) {
         if (!mounted) return;
-        
+
         console.error("❌ Failed to load invoices:", err);
 
         if (err.message?.includes('403') || err.message?.includes('Access denied')) {
           setError('Access denied. Your session may have expired.');
-        } 
+        }
         else if (err.message?.includes('401') || err.message?.includes('Unauthorized')) {
           setError('Your session has expired. Redirecting to login...');
           setTimeout(() => {
@@ -618,7 +644,7 @@ export default function InvoiceListPage() {
 
   // ✅ STEP 1: Open dialog and fetch client email
   const handleShareClick = async (invoice) => {
-    
+
     setSelectedInvoice(invoice);
     setShareDialogOpen(true);
     setClientEmail(''); // Reset
@@ -627,20 +653,20 @@ export default function InvoiceListPage() {
     try {
       // Fetch full invoice to get client email from snapshot
       const result = await getInvoice(invoice.id);
-      
+
       if (result?.ok && result.invoice) {
         const fullInvoice = result.invoice;
-        
+
         // Extract client email from snapshot
         let email = null;
-        
+
         if (fullInvoice.snapshot?.client?.email) {
           email = fullInvoice.snapshot.client.email;
         } else if (fullInvoice.client?.email) {
           email = fullInvoice.client.email;
         }
         setClientEmail(email || '');
-        
+
         if (!email) {
           setError('Client email not found in invoice data');
         }
@@ -687,9 +713,9 @@ export default function InvoiceListPage() {
 
     } catch (error) {
       console.error('❌ Share error:', error);
-      
+
       let errorMessage = error.message;
-      
+
       // Provide helpful error messages
       if (errorMessage.includes('Client email not found')) {
         errorMessage = 'Client email not found in invoice.\n\nPlease update the project with client email and regenerate the invoice.';
@@ -698,7 +724,7 @@ export default function InvoiceListPage() {
       } else if (errorMessage.includes('Invalid client email format')) {
         errorMessage = 'The client email in the invoice is invalid.\n\nPlease update the project with a valid email address.';
       }
-      
+
       alert(`❌ Failed to send invoice:\n\n${errorMessage}`);
     } finally {
       setSharingInvoiceId(null);
@@ -732,12 +758,12 @@ export default function InvoiceListPage() {
 
   const getStatusBadge = (type) => {
     return type === "final"
-      ? { icon: "✅", text: "Final", class: "status-final" }
-      : { icon: "💾", text: "Draft", class: "status-draft" };
+      ? { text: "Final", class: "il-badge il-badge--final" }
+      : { text: "Draft", class: "il-badge il-badge--draft" };
   };
 
   const handleViewInvoice = (invoice) => {
-    
+
     if (!invoice.id) {
       console.error('❌ Invalid invoice: missing ID', invoice);
       alert('Cannot open invoice: Invalid invoice ID');
@@ -756,6 +782,20 @@ export default function InvoiceListPage() {
     } catch (err) {
       console.error('❌ Navigation failed:', err);
       alert(`Failed to open invoice: ${err.message}`);
+    }
+  };
+
+  // ── PDF Download (Server-side Puppeteer) ───────────────────────────────
+  const handleDownloadPDF = async (inv) => {
+    if (!inv.id || downloadingPdfId) return;
+    try {
+      setDownloadingPdfId(inv.id);
+      await downloadInvoicePDFFromServer(inv.id, `${inv.invoiceNumber || 'INVOICE'}.pdf`);
+    } catch (err) {
+      console.error('❌ PDF download failed:', err);
+      alert(`Failed to download PDF: ${err.message}`);
+    } finally {
+      setDownloadingPdfId(null);
     }
   };
 
@@ -794,16 +834,16 @@ export default function InvoiceListPage() {
           <div className="error-icon">⚠️</div>
           <h3>Failed to Load Invoices</h3>
           <p>{error}</p>
-          
+
           <div className="error-actions">
-            <button 
-              className="btn-primary" 
+            <button
+              className="btn-primary"
               onClick={() => window.location.reload()}
             >
               🔄 Retry
             </button>
-            <button 
-              className="btn-secondary" 
+            <button
+              className="btn-secondary"
               onClick={() => navigate("/dashboard")}
             >
               ← Back to Dashboard
@@ -814,144 +854,132 @@ export default function InvoiceListPage() {
     );
   }
 
+  const totalCount = allInvoices.length;
+  const finalCount = allInvoices.filter(inv => inv.type === 'final').length;
+  const draftCount = allInvoices.filter(inv => inv.type === 'draft').length;
+
   return (
-    <div className="invoice-list-page">
-      
+    <div className="il-page">
+
       {error && allInvoices.length > 0 && (
-        <div style={{
-          background: '#fef3c7',
-          border: '1px solid #fbbf24',
-          padding: '12px 20px',
-          borderRadius: '12px',
-          marginBottom: '24px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px'
-        }}>
-          <span style={{ fontSize: '20px' }}>⚠️</span>
-          <span style={{ fontSize: '14px', color: '#92400e' }}>{error}</span>
-        </div>
+        <div className="il-warn-banner">⚠️ {error}</div>
       )}
 
-      <div className="search-action-bar">
-        <div className="search-wrapper">
-          <span className="search-icon">🔍</span>
+      {/* ── Title Row ────────────────────────────────────── */}
+      <div className="il-header">
+        <div>
+          <h1 className="il-header__title">My Invoices</h1>
+          <p className="il-header__sub">Manage, share &amp; download your invoices</p>
+        </div>
+        <button className="il-btn il-btn--create" onClick={() => navigate("/dashboard/create-invoice")}>
+          + New Invoice
+        </button>
+      </div>
+
+      {/* ── Stat Cards ───────────────────────────────────── */}
+      <div className="il-stats il-stats--3col">
+        <div
+          className={`stat-card${activeFilter === 'all' ? ' stat-card--active' : ''}`}
+          style={activeFilter === 'all' ? { '--accent': '#1d4ed8' } : { '--accent': '#2563eb' }}
+          onClick={() => setActiveFilter('all')}
+        >
+          <div className="stat-card__value">{totalCount}</div>
+          <div className="stat-card__label">Total Invoices</div>
+          <div className="stat-card__bar" />
+        </div>
+        <div
+          className={`stat-card${activeFilter === 'final' ? ' stat-card--active' : ''}`}
+          style={{ '--accent': '#059669' }}
+          onClick={() => setActiveFilter('final')}
+        >
+          <div className="stat-card__value">{finalCount}</div>
+          <div className="stat-card__label">Finalized</div>
+          <div className="stat-card__bar" />
+        </div>
+        <div
+          className={`stat-card${activeFilter === 'draft' ? ' stat-card--active' : ''}`}
+          style={{ '--accent': '#6366f1' }}
+          onClick={() => setActiveFilter('draft')}
+        >
+          <div className="stat-card__value">{draftCount}</div>
+          <div className="stat-card__label">Drafts</div>
+          <div className="stat-card__bar" />
+        </div>
+      </div>
+
+      {/* ── Toolbar: Search + Filter Tabs ────────────────── */}
+      <div className="il-toolbar">
+        <div className="il-search-wrap">
+          <span className="il-search-icon">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+          </span>
           <input
             type="text"
-            placeholder="Search invoices by number, client, or project..."
+            className="il-search"
+            placeholder="Search by invoice #, client, or project..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="search-input"
           />
           {search && (
-            <button className="clear-search" onClick={() => setSearch("")}>
-              ✕
-            </button>
+            <button className="il-search-clear" onClick={() => setSearch("")}>✕</button>
           )}
         </div>
 
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-          <div style={{ 
-            display: 'flex', 
-            gap: '8px', 
-            padding: '4px',
-            background: '#f3f4f6',
-            borderRadius: '8px'
-          }}>
-            <button
-              onClick={() => setActiveFilter("all")}
-              style={{
-                padding: '8px 16px',
-                border: 'none',
-                borderRadius: '6px',
-                background: activeFilter === "all" ? '#6366f1' : 'transparent',
-                color: activeFilter === "all" ? 'white' : '#6b7280',
-                fontWeight: activeFilter === "all" ? '600' : '500',
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-            >
-              All ({allInvoices.length})
-            </button>
-            <button
-              onClick={() => setActiveFilter("final")}
-              style={{
-                padding: '8px 16px',
-                border: 'none',
-                borderRadius: '6px',
-                background: activeFilter === "final" ? '#6366f1' : 'transparent',
-                color: activeFilter === "final" ? 'white' : '#6b7280',
-                fontWeight: activeFilter === "final" ? '600' : '500',
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-            >
-              Final ({allInvoices.filter(inv => inv.type === "final").length})
-            </button>
-            <button
-              onClick={() => setActiveFilter("draft")}
-              style={{
-                padding: '8px 16px',
-                border: 'none',
-                borderRadius: '6px',
-                background: activeFilter === "draft" ? '#6366f1' : 'transparent',
-                color: activeFilter === "draft" ? 'white' : '#6b7280',
-                fontWeight: activeFilter === "draft" ? '600' : '500',
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-            >
-              Drafts ({allInvoices.filter(inv => inv.type === "draft").length})
-            </button>
-          </div>
-
-          <button
-            className="btn-create-new"
-            onClick={() => navigate("/dashboard/create-invoice")}
-          >
-            <span>➕</span> Create New Invoice
+        <div className="il-filter-tabs">
+          <button className={`il-filter-tab${activeFilter === 'all' ? ' il-filter-tab--active' : ''}`} onClick={() => setActiveFilter('all')}>
+            All ({totalCount})
+          </button>
+          <button className={`il-filter-tab${activeFilter === 'final' ? ' il-filter-tab--active' : ''}`} onClick={() => setActiveFilter('final')}>
+            Final ({finalCount})
+          </button>
+          <button className={`il-filter-tab${activeFilter === 'draft' ? ' il-filter-tab--active' : ''}`} onClick={() => setActiveFilter('draft')}>
+            Drafts ({draftCount})
           </button>
         </div>
       </div>
 
-      <div className="invoices-card">
-        <div className="card-header">
+      {/* ── Table Card ───────────────────────────────────── */}
+      <div className="il-card">
+        <div className="il-card__head">
           <div>
-            <h2 className="card-title">
-              {activeFilter === "all" ? "All Invoices" : 
-               activeFilter === "final" ? "Final Invoices" : "Draft Invoices"}
+            <h2 className="il-card__title">
+              {activeFilter === "all" ? "All Invoices" :
+                activeFilter === "final" ? "Final Invoices" : "Draft Invoices"}
             </h2>
-            <p className="card-subtitle">
-              Showing {filteredInvoices.length} of {allInvoices.length} invoices
+            <p className="il-card__sub">
+              {filteredInvoices.length} of {totalCount} invoices
             </p>
           </div>
+          <button className="il-btn il-btn--ghost il-btn--sm" onClick={() => window.location.reload()}>
+            ↻ Refresh
+          </button>
         </div>
 
         {filteredInvoices.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-icon">
+          <div className="il-empty">
+            <div className="il-empty__icon">
               {search ? "🔍" : activeFilter === "draft" ? "💾" : "📄"}
             </div>
-            <h3 className="empty-title">
-              {search ? "No invoices found" : 
-               activeFilter === "draft" ? "No drafts yet" : "No invoices yet"}
+            <h3 className="il-empty__title">
+              {search ? "No invoices found" :
+                activeFilter === "draft" ? "No drafts yet" : "No invoices yet"}
             </h3>
-            <p className="empty-description">
-              {search ? "Try a different search term" : 
-               "Create your first invoice to get started"}
+            <p className="il-empty__sub">
+              {search ? "Try a different search term" :
+                "Create your first invoice to get started"}
             </p>
             {!search && (
               <button
-                className="btn-primary"
+                className="il-btn il-btn--primary"
                 onClick={() => navigate("/dashboard/create-invoice")}
               >
-                ➕ Create Invoice
+                + Create Invoice
               </button>
             )}
           </div>
         ) : (
-          <div className="table-wrapper">
-            <table className="invoices-table">
+          <div className="il-table-wrap">
+            <table className="il-table">
               <thead>
                 <tr>
                   <th>Invoice #</th>
@@ -960,7 +988,7 @@ export default function InvoiceListPage() {
                   <th>Amount</th>
                   <th>Date</th>
                   <th>Status</th>
-                  <th className="actions-header">Actions</th>
+                  <th className="il-th-actions">Actions</th>
                 </tr>
               </thead>
 
@@ -970,51 +998,54 @@ export default function InvoiceListPage() {
                   const isSharing = sharingInvoiceId === inv.id;
 
                   return (
-                    <tr key={inv.id} className="invoice-row">
-                      <td className="invoice-number">{inv.invoiceNumber}</td>
-                      <td className="client-name">{inv.clientName}</td>
-                      <td className="project-code">{inv.projectCode}</td>
-                      <td className="amount">{formatCurrency(inv.total)}</td>
-                      <td className="date">{formatDate(inv.date)}</td>
+                    <tr key={inv.id} className="il-row">
                       <td>
-                        <span className={`status-badge ${badge.class}`}>
-                          {badge.icon} {badge.text}
+                        <span className={`il-inv-num ${inv.type === 'final' ? 'il-inv-num--final' : 'il-inv-num--draft'}`}>
+                          {inv.invoiceNumber}
+                        </span>
+                      </td>
+                      <td className="il-client">{inv.clientName}</td>
+                      <td><span className="il-project-tag">{inv.projectCode}</span></td>
+                      <td className="il-amount">{formatCurrency(inv.total)}</td>
+                      <td className="il-date">{formatDate(inv.date)}</td>
+                      <td>
+                        <span className={badge.class}>
+                          {badge.text}
                         </span>
                       </td>
                       <td className="actions">
-                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                          {/* View/Edit Button */}
+                        <div className="il-actions">
+                          {/* View / Edit */}
                           <button
-                            className={`btn-icon ${inv.type === "draft" ? "btn-edit" : ""}`}
-                            title={inv.type === "final" ? "View Invoice" : "Edit Draft"}
+                            className={`il-action-btn ${inv.type === 'final' ? 'il-action-btn--view' : 'il-action-btn--edit'}`}
+                            title={inv.type === 'final' ? 'View Invoice' : 'Edit Draft'}
                             onClick={() => handleViewInvoice(inv)}
                           >
-                            {inv.type === "final" ? "👁️" : "✏️"}
+                            {inv.type === 'final' ? <EyeIcon /> : <EditIcon />}
+                            <span className="il-action-label">{inv.type === 'final' ? 'View' : 'Edit'}</span>
                           </button>
 
-                          {/* Share Button - Only for Final Invoices */}
-                          {inv.type === "final" && (
-                            <button
-                              className="btn-icon"
-                              title="Share Invoice via Email"
-                              onClick={() => handleShareClick(inv)}
-                              disabled={isSharing}
-                              style={{
-                                opacity: isSharing ? 0.5 : 1,
-                                cursor: isSharing ? 'not-allowed' : 'pointer',
-                                background: isSharing ? '#e5e7eb' : '#3b82f6',
-                                color: 'white',
-                                border: 'none',
-                                padding: '6px 12px',
-                                borderRadius: '6px',
-                                fontSize: '14px',
-                                fontWeight: '500',
-                                transition: 'all 0.2s'
-                              }}
-                            >
-                              {isSharing ? '⏳' : '📧'}
-                            </button>
-                          )}
+                          {/* Share */}
+                          <button
+                            className={`il-action-btn il-action-btn--share ${inv.type !== 'final' ? 'il-action-btn--locked' : ''}`}
+                            title={inv.type === 'final' ? 'Share via Email' : 'Finalize to share'}
+                            onClick={inv.type === 'final' ? () => handleShareClick(inv) : undefined}
+                            disabled={inv.type !== 'final' || isSharing}
+                          >
+                            {isSharing ? <span className="il-spin-sm" /> : <MailIcon />}
+                            <span className="il-action-label">Share</span>
+                          </button>
+
+                          {/* PDF Download */}
+                          <button
+                            className={`il-action-btn il-action-btn--download ${inv.type !== 'final' ? 'il-action-btn--locked' : ''}`}
+                            title={inv.type === 'final' ? 'Download PDF' : 'Finalize to download'}
+                            onClick={inv.type === 'final' ? () => handleDownloadPDF(inv) : undefined}
+                            disabled={inv.type !== 'final' || downloadingPdfId === inv.id}
+                          >
+                            {downloadingPdfId === inv.id ? <span className="il-spin-sm" /> : <DownloadIcon />}
+                            <span className="il-action-label">PDF</span>
+                          </button>
                         </div>
                       </td>
                     </tr>
