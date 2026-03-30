@@ -1,6 +1,6 @@
 
 import React from "react";
-import { LOGO_URL } from "../config/branding";
+import logoDataUrl from "../assets/1.png?inline";
 
 
 function formatINR(value) {
@@ -11,7 +11,7 @@ function formatINR(value) {
   }).format(Number(value || 0));
 }
 
-export default function InvoiceComplete({ invoice = {}, logoUrl = "" }) {
+export default function InvoiceComplete({ invoice = {} }) {
   // ============================================================================
   // EXTRACT SNAPSHOT (SINGLE SOURCE OF TRUTH)
   // ============================================================================
@@ -853,7 +853,7 @@ export default function InvoiceComplete({ invoice = {}, logoUrl = "" }) {
           <div className="footer-content">
             <span className="footer-text-modern">INVOICE GENERATED ON </span>
             <a href="https://www.hourly.design/" target="_blank" rel="noopener noreferrer" className="footer-logo-link">
-              <img src={LOGO_URL} alt="Hourly Design" />
+              <img src={logoDataUrl} alt="Hourly Design" />
             </a>
           </div>
         </div>

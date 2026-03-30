@@ -426,7 +426,7 @@ export async function shareInvoice({
   }
 
   try {
-    // ✅ SECURITY: No toEmail parameter - backend fetches from invoice data
+    // ✅ Internal send for approval (Hourly + consultant)
     const result = await apiPost('/invoices/share', {
       invoiceId,          // 🔒 Backend will verify this is FINAL
       html,
@@ -616,6 +616,31 @@ export async function autoShareInvoice(invoiceId) {
 
   } catch (error) {
     console.error('❌ Auto-share error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Send invoice to client after approval
+ */
+export async function sendInvoiceToClient(invoiceId) {
+  if (!invoiceId) {
+    throw new Error('Invoice ID is required');
+  }
+
+  try {
+    const apiKey = localStorage.getItem('adminApiKey') || '';
+    const result = await apiPost('/invoices/send-to-client', { invoiceId, apiKey }, true, 30000);
+    return {
+      success: true,
+      ok: true,
+      sentTo: result.sentTo,
+      hasPDF: result.hasPDF,
+      filename: result.filename,
+      messageId: result.messageId,
+    };
+  } catch (error) {
+    console.error('❌ Send-to-client error:', error);
     throw error;
   }
 }

@@ -12,6 +12,7 @@ const apps = require('../lib/appsScriptClient');
 const logger = require('../utils/logger');
 const { sendInvoiceEmail } = require('../utils/invoiceEmailService');
 const { generateInvoicePDF } = require('../utils/pdfGenerator');
+const { createApprovalToken, verifyApprovalToken, markTokenUsed } = require('../utils/approvalTokens');
 
 // Load logo for PDF generation
 const logoPath = path.join(__dirname, '../assets/logo.png');
@@ -22,6 +23,30 @@ try {
   }
 } catch (err) {
   console.error('Error loading PDF logo:', err);
+}
+
+/* ============================================================================
+   HELPER: Parse comma-separated emails
+============================================================================ */
+function parseEmailList(value) {
+  if (!value) return [];
+  return String(value)
+    .split(',')
+    .map((e) => e.trim())
+    .filter(Boolean);
+}
+
+function isValidEmail(email) {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return !!email && emailRegex.test(String(email).trim());
+}
+
+function getBackendBaseUrl(req) {
+  const envUrl = process.env.BACKEND_PUBLIC_URL;
+  if (envUrl) return String(envUrl).replace(/\/+$/, '');
+  const proto = (req.headers['x-forwarded-proto'] || req.protocol || 'http');
+  const host = (req.headers['x-forwarded-host'] || req.get('host'));
+  return `${proto}://${host}`;
 }
 
 /* ============================================================================
@@ -268,7 +293,16 @@ router.post('/finalize', async (req, res) => {
       0
     );
 
-    const auditGst = Math.round(auditSubtotal * 0.18);
+    // Respect GST rate from snapshot when present (0 is valid)
+    let auditGstRate = snapshot.totals?.gstRate;
+    if (auditGstRate == null && snapshot.totals?.gst != null && auditSubtotal > 0) {
+      auditGstRate = Number(snapshot.totals.gst) / auditSubtotal;
+    }
+    auditGstRate = Number(auditGstRate ?? 0.18);
+    if (!Number.isFinite(auditGstRate)) auditGstRate = 0.18;
+    if (auditGstRate > 1) auditGstRate = auditGstRate / 100;
+
+    const auditGst = Math.round(auditSubtotal * auditGstRate);
     const auditTotal = auditSubtotal + auditGst;
 
     if (Math.abs(auditTotal - Number(snapshot.totals?.total || 0)) > 1) {
@@ -555,7 +589,7 @@ router.post('/share', async (req, res) => {
     if (!invoiceId) {
       return res.status(400).json({
         ok: false,
-        error: 'Invoice ID required - cannot share drafts'
+        error: 'Invoice ID required'
       });
     }
 
@@ -568,17 +602,22 @@ router.post('/share', async (req, res) => {
           error: ownership.error
         });
       }
-
-      // ✅ CRITICAL: Only allow sharing finalized invoices
-      if (String(ownership.invoice.status).toUpperCase() !== 'FINAL') {
-        return res.status(400).json({
-          ok: false,
-          error: 'Can only share finalized invoices'
-        });
-      }
     }
 
-    // ✅ SECURITY: Fetch invoice to get CLIENT EMAIL from stored data
+    // ✅ INTERNAL SEND: Hourly + consultant (NO client)
+    const hourlyRecipients = parseEmailList(process.env.ADMIN_CC_EMAIL);
+    if (hourlyRecipients.length === 0) {
+      return res.status(500).json({
+        ok: false,
+        error: 'Hourly recipient emails not configured. Set ADMIN_CC_EMAIL in backend .env'
+      });
+    }
+
+    const consultantEmail = req.user?.email;
+    // For admin approval email: ONLY Hourly admins get approve/reject buttons.
+    // Consultant will receive a separate FYI email without approval links.
+
+    // ✅ SECURITY: Fetch invoice for canonical metadata (invoice #, etc.)
     const invoiceResult = await apps.getInvoiceById(invoiceId);
 
     if (!invoiceResult?.ok) {
@@ -590,39 +629,6 @@ router.post('/share', async (req, res) => {
 
     const invoice = invoiceResult.invoice;
 
-    // ✅ CRITICAL: Extract client email from invoice snapshot (SINGLE SOURCE OF TRUTH)
-    let clientEmail = null;
-
-    if (invoice.snapshot?.client?.email) {
-      clientEmail = invoice.snapshot.client.email;
-    } else if (invoice.client?.email) {
-      clientEmail = invoice.client.email;
-    }
-
-    // ✅ VALIDATION: Client email must exist in invoice data
-    if (!clientEmail || !clientEmail.trim()) {
-      logger.error({ invoiceId }, '❌ Client email missing in invoice data');
-      return res.status(400).json({
-        ok: false,
-        error: 'Client email not found in invoice data. Please contact support.'
-      });
-    }
-
-    // ✅ VALIDATION: Email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(clientEmail)) {
-      logger.error({ invoiceId, clientEmail }, '❌ Invalid client email format');
-      return res.status(400).json({
-        ok: false,
-        error: 'Invalid client email format in records'
-      });
-    }
-
-    logger.info({
-      invoiceId,
-      clientEmail: clientEmail.replace(/(?<=.{2}).*(?=@)/, '***') // Mask for logs
-    }, '✅ Using client email from invoice data');
-
     // ✅ BUILD EMAIL PAYLOAD
     const emailPayload = {
       invoiceNumber: invoice.invoiceNumber || invoiceId,
@@ -633,24 +639,52 @@ router.post('/share', async (req, res) => {
       total: total || invoice.totals?.total || invoice.total || 0,
       subtotal: subtotal || invoice.totals?.subtotal || invoice.subtotal || 0,
       gst: gst || invoice.totals?.gst || invoice.gst || 0,
+      _recipientType: 'internal',
+      _approvalLinks: (() => {
+        const base = getBackendBaseUrl(req);
+        const approveToken = createApprovalToken({ invoiceId, action: 'approve' });
+        const rejectToken = createApprovalToken({ invoiceId, action: 'reject' });
+        return {
+          approveUrl: `${base}/api/invoices/approval/approve?token=${encodeURIComponent(approveToken)}`,
+          rejectUrl: `${base}/api/invoices/approval/reject?token=${encodeURIComponent(rejectToken)}`,
+        };
+      })(),
     };
 
-    // ✅ SEND EMAIL (toEmail comes from invoice data ONLY)
+    // ✅ SEND EMAIL (Hourly recipients as TO, consultant as CC)
     const result = await sendInvoiceEmail({
-      toEmail: clientEmail, // 🔒 SECURITY: From invoice data only
+      toEmail: hourlyRecipients,
       invoice: emailPayload,
       invoiceHTML: html
     });
 
+    // ✅ Send separate FYI copy to consultant (no approval links)
+    if (isValidEmail(consultantEmail)) {
+      try {
+        const consultantPayload = {
+          ...emailPayload,
+          _approvalLinks: null,
+        };
+        await sendInvoiceEmail({
+          toEmail: String(consultantEmail).trim(),
+          invoice: consultantPayload,
+          invoiceHTML: html
+        });
+      } catch (e) {
+        logger.warn({ invoiceId, err: e.message }, 'Failed to send consultant FYI approval email');
+      }
+    }
+
     logger.info({
       invoiceId,
-      clientEmail: clientEmail.replace(/(?<=.{2}).*(?=@)/, '***')
-    }, '✅ Invoice sent successfully to client');
+      hourlyRecipientsCount: hourlyRecipients.length,
+      hasConsultantEmail: !!consultantEmail
+    }, '✅ Invoice sent for approval (internal)');
 
     return res.json({
       ok: true,
-      message: 'Invoice sent successfully to client',
-      sentTo: clientEmail.replace(/(?<=.{2}).*(?=@)/, '***'), // Masked response
+      message: 'Invoice sent for approval',
+      sentTo: hourlyRecipients,
       format: result.format,
       hasPDF: result.hasPDF
     });
@@ -739,31 +773,26 @@ router.post('/share-auto', async (req, res) => {
       });
     }
 
-    // ✅ EXTRACT: Client email from snapshot
-    const clientEmail = snapshot?.client?.email;
-
-    if (!clientEmail || !clientEmail.trim()) {
-      logger.error({ invoiceId }, '❌ Client email missing in invoice snapshot');
-      return res.status(400).json({
+    // ✅ INTERNAL SEND: Hourly + consultant only (NO client)
+    const hourlyRecipients = parseEmailList(process.env.ADMIN_CC_EMAIL);
+    if (hourlyRecipients.length === 0) {
+      return res.status(500).json({
         ok: false,
-        error: 'Client email not found in invoice. Please update the project with client email and regenerate the invoice.'
+        error: 'Hourly recipient emails not configured. Set ADMIN_CC_EMAIL in backend .env'
       });
     }
 
-    // ✅ VALIDATE: Email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(clientEmail)) {
-      logger.error({ invoiceId, clientEmail }, '❌ Invalid client email format');
-      return res.status(400).json({
-        ok: false,
-        error: 'Invalid client email format in invoice data'
-      });
+    const consultantEmail = req.user?.email;
+    const ccEmails = [];
+    if (isValidEmail(consultantEmail)) {
+      ccEmails.push(String(consultantEmail).trim());
     }
 
     logger.info({
       invoiceId,
-      clientEmail: clientEmail.replace(/(?<=.{2}).*(?=@)/, '***')
-    }, '✅ Client email found, generating invoice HTML');
+      hourlyRecipientsCount: hourlyRecipients.length,
+      hasConsultantEmail: !!consultantEmail
+    }, '✅ Sending invoice for approval (internal) and generating HTML');
 
     // ✅ GENERATE: Invoice HTML from snapshot
     const invoiceHTML = generateInvoiceHTMLFromSnapshot(snapshot);
@@ -778,11 +807,13 @@ router.post('/share-auto', async (req, res) => {
       total: snapshot.totals?.total || 0,
       subtotal: snapshot.totals?.subtotal || 0,
       gst: snapshot.totals?.gst || 0,
+      _recipientType: 'internal',
+      ccEmails,
     };
 
     // ✅ SEND: Email with PDF
     const emailResult = await sendInvoiceEmail({
-      toEmail: clientEmail,
+      toEmail: hourlyRecipients,
       invoice: emailPayload,
       invoiceHTML: invoiceHTML
     });
@@ -790,15 +821,14 @@ router.post('/share-auto', async (req, res) => {
     logger.info({
       invoiceId,
       invoiceNumber: emailPayload.invoiceNumber,
-      clientEmail: clientEmail.replace(/(?<=.{2}).*(?=@)/, '***'),
       hasPDF: emailResult.hasPDF
-    }, '✅ Invoice auto-shared successfully');
+    }, '✅ Invoice sent for approval successfully (internal)');
 
     return res.json({
       ok: true,
       success: true,
-      message: 'Invoice sent successfully',
-      sentTo: clientEmail, // ✅ Return full email (frontend can mask if needed)
+      message: 'Invoice sent for approval',
+      sentTo: hourlyRecipients, // list
       invoiceNumber: emailPayload.invoiceNumber,
       hasPDF: emailResult.hasPDF,
       filename: emailResult.filename,
@@ -812,6 +842,252 @@ router.post('/share-auto', async (req, res) => {
       ok: false,
       error: err.message || 'Failed to share invoice'
     });
+  }
+});
+
+/* ============================================================================
+   ✅ EMAIL APPROVAL LINKS (no login required)
+============================================================================ */
+router.get('/approval/approve', async (req, res) => {
+  try {
+    const token = req.query.token;
+    const v = verifyApprovalToken(token);
+    if (!v.ok) {
+      return res.status(400).send(`<html><body style="font-family:Arial;padding:24px"><h2>Invalid approval link</h2><p>${v.error}</p></body></html>`);
+    }
+    if (v.payload.action !== 'approve') {
+      return res.status(400).send(`<html><body style="font-family:Arial;padding:24px"><h2>Invalid action</h2></body></html>`);
+    }
+    markTokenUsed(v.payload.nonce);
+
+    const invoiceId = v.payload.invoiceId;
+    const invoiceResult = await apps.getInvoiceById(invoiceId);
+    if (!invoiceResult?.ok) {
+      return res.status(404).send(`<html><body style="font-family:Arial;padding:24px"><h2>Invoice not found</h2></body></html>`);
+    }
+
+    const invoice = invoiceResult.invoice;
+    let snapshot;
+    try {
+      snapshot = typeof invoice.snapshot === 'string' ? JSON.parse(invoice.snapshot) : invoice.snapshot;
+    } catch (e) {
+      return res.status(400).send(`<html><body style="font-family:Arial;padding:24px"><h2>Invalid invoice snapshot</h2></body></html>`);
+    }
+
+    const clientEmail = snapshot?.client?.email || invoice.client?.email;
+    if (!isValidEmail(clientEmail)) {
+      return res.status(400).send(`<html><body style="font-family:Arial;padding:24px"><h2>Client email missing/invalid</h2></body></html>`);
+    }
+
+    const hourlyRecipients = parseEmailList(process.env.ADMIN_CC_EMAIL);
+    const consultantEmail = snapshot?.consultant?.email || invoice.consultantEmail || invoice.consultant?.email;
+    const ccEmails = [
+      ...hourlyRecipients,
+      ...(isValidEmail(consultantEmail) ? [String(consultantEmail).trim()] : []),
+    ].filter((v2, i, arr) => arr.indexOf(v2) === i);
+
+    const invoiceHTML = generateInvoiceHTMLFromSnapshot(snapshot);
+    const emailPayload = {
+      invoiceNumber: snapshot.meta?.invoiceNumber || invoice.invoiceNumber || invoiceId,
+      invoiceId,
+      projectCode: snapshot.project?.projectCode || invoice.projectCode || 'N/A',
+      consultantName: snapshot.consultant?.name || invoice.consultantName || 'Consultant',
+      clientName: snapshot.client?.name || 'Client',
+      total: snapshot.totals?.total || 0,
+      subtotal: snapshot.totals?.subtotal || 0,
+      gst: snapshot.totals?.gst || 0,
+      _recipientType: 'client',
+      ccEmails,
+    };
+
+    await sendInvoiceEmail({
+      toEmail: String(clientEmail).trim(),
+      invoice: emailPayload,
+      invoiceHTML,
+    });
+
+    return res.send(`<html><body style="font-family:Arial;padding:24px"><h2>Approved</h2><p>Invoice has been approved and sent to the client.</p></body></html>`);
+  } catch (err) {
+    logger.error({ err: err.message, stack: err.stack }, 'Approval approve failed');
+    return res.status(500).send(`<html><body style="font-family:Arial;padding:24px"><h2>Error</h2><p>${err.message}</p></body></html>`);
+  }
+});
+
+router.get('/approval/reject', async (req, res) => {
+  try {
+    const token = req.query.token;
+    const v = verifyApprovalToken(token);
+    if (!v.ok) {
+      return res.status(400).send(`<html><body style="font-family:Arial;padding:24px"><h2>Invalid rejection link</h2><p>${v.error}</p></body></html>`);
+    }
+    if (v.payload.action !== 'reject') {
+      return res.status(400).send(`<html><body style="font-family:Arial;padding:24px"><h2>Invalid action</h2></body></html>`);
+    }
+    markTokenUsed(v.payload.nonce);
+
+    const invoiceId = v.payload.invoiceId;
+    const invoiceResult = await apps.getInvoiceById(invoiceId);
+    if (!invoiceResult?.ok) {
+      return res.status(404).send(`<html><body style="font-family:Arial;padding:24px"><h2>Invoice not found</h2></body></html>`);
+    }
+
+    const invoice = invoiceResult.invoice;
+    let snapshot;
+    try {
+      snapshot = typeof invoice.snapshot === 'string' ? JSON.parse(invoice.snapshot) : invoice.snapshot;
+    } catch (e) {
+      snapshot = null;
+    }
+
+    const hourlyRecipients = parseEmailList(process.env.ADMIN_CC_EMAIL);
+    const consultantEmail = (snapshot?.consultant?.email) || invoice.consultantEmail || invoice.consultant?.email;
+
+    const rejectNoticeHtml = `
+      <div style="font-family: Arial, sans-serif;">
+        <h2 style="margin:0 0 8px 0;">Invoice rejected</h2>
+        <p style="margin:0 0 12px 0;">Invoice <strong>${snapshot?.meta?.invoiceNumber || invoice.invoiceNumber || invoiceId}</strong> has been rejected by Hourly.</p>
+        <p style="margin:0;">Please review and re-submit for approval.</p>
+      </div>
+    `.trim();
+
+    // Notify consultant (if available)
+    if (isValidEmail(consultantEmail)) {
+      await sendInvoiceEmail({
+        toEmail: String(consultantEmail).trim(),
+        invoice: {
+          invoiceNumber: snapshot?.meta?.invoiceNumber || invoice.invoiceNumber || invoiceId,
+          projectCode: snapshot?.project?.projectCode || invoice.projectCode || 'N/A',
+          consultantName: snapshot?.consultant?.name || invoice.consultantName || 'Consultant',
+          total: snapshot?.totals?.total || 0,
+          _recipientType: 'internal',
+          _approvalLinks: null,
+        },
+        invoiceHTML: rejectNoticeHtml,
+      });
+    }
+
+    // Notify Hourly (admin list)
+    if (hourlyRecipients.length) {
+      await sendInvoiceEmail({
+        toEmail: hourlyRecipients,
+        invoice: {
+          invoiceNumber: snapshot?.meta?.invoiceNumber || invoice.invoiceNumber || invoiceId,
+          projectCode: snapshot?.project?.projectCode || invoice.projectCode || 'N/A',
+          consultantName: snapshot?.consultant?.name || invoice.consultantName || 'Consultant',
+          total: snapshot?.totals?.total || 0,
+          _recipientType: 'internal',
+          _approvalLinks: null,
+        },
+        invoiceHTML: rejectNoticeHtml,
+      });
+    }
+
+    return res.send(`<html><body style="font-family:Arial;padding:24px"><h2>Rejected</h2><p>Invoice has been rejected. The consultant has been notified.</p></body></html>`);
+  } catch (err) {
+    logger.error({ err: err.message, stack: err.stack }, 'Approval reject failed');
+    return res.status(500).send(`<html><body style="font-family:Arial;padding:24px"><h2>Error</h2><p>${err.message}</p></body></html>`);
+  }
+});
+
+/* ============================================================================
+   ✅ SEND TO CLIENT (after approval)
+   Sends to client email in snapshot; CC Hourly + consultant
+============================================================================ */
+router.post('/send-to-client', async (req, res) => {
+  try {
+    // 🔒 Hourly admin approval only
+    const key = req.headers['x-api-key'] || req.query.apiKey || req.body?.apiKey;
+    if (!key || key !== (process.env.ADMIN_API_KEY || '')) {
+      return res.status(401).json({ ok: false, error: 'unauthorized' });
+    }
+
+    const consultantId = getConsultantId(req);
+    const { invoiceId } = req.body;
+
+    if (!invoiceId) {
+      return res.status(400).json({ ok: false, error: 'Invoice ID required' });
+    }
+
+    // ✅ SECURITY: Verify ownership
+    if (consultantId) {
+      const ownership = await verifyInvoiceOwnership(invoiceId, consultantId);
+      if (!ownership.ok) {
+        return res.status(ownership.statusCode || 403).json({
+          ok: false,
+          error: ownership.error
+        });
+      }
+      if (String(ownership.invoice.status).toUpperCase() !== 'FINAL') {
+        return res.status(400).json({
+          ok: false,
+          error: 'Can only send finalized invoices'
+        });
+      }
+    }
+
+    const invoiceResult = await apps.getInvoiceById(invoiceId);
+    if (!invoiceResult?.ok) {
+      return res.status(404).json({ ok: false, error: 'Invoice not found' });
+    }
+
+    const invoice = invoiceResult.invoice;
+    let snapshot;
+    try {
+      snapshot = typeof invoice.snapshot === 'string'
+        ? JSON.parse(invoice.snapshot)
+        : invoice.snapshot;
+    } catch (err) {
+      logger.error({ invoiceId, error: err.message }, '❌ Failed to parse snapshot');
+      return res.status(400).json({ ok: false, error: 'Invalid invoice snapshot format' });
+    }
+
+    const clientEmail = snapshot?.client?.email;
+    if (!isValidEmail(clientEmail)) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Client email not found or invalid in invoice snapshot'
+      });
+    }
+
+    const hourlyRecipients = parseEmailList(process.env.ADMIN_CC_EMAIL);
+    const consultantEmail = req.user?.email;
+    const ccEmails = [
+      ...hourlyRecipients,
+      ...(isValidEmail(consultantEmail) ? [String(consultantEmail).trim()] : []),
+    ].filter((v, i, arr) => arr.indexOf(v) === i);
+
+    const invoiceHTML = generateInvoiceHTMLFromSnapshot(snapshot);
+    const emailPayload = {
+      invoiceNumber: snapshot.meta?.invoiceNumber || invoice.invoiceNumber || invoiceId,
+      invoiceId: invoiceId,
+      projectCode: snapshot.project?.projectCode || 'N/A',
+      consultantName: snapshot.consultant?.name || 'Consultant',
+      clientName: snapshot.client?.name || 'Client',
+      total: snapshot.totals?.total || 0,
+      subtotal: snapshot.totals?.subtotal || 0,
+      gst: snapshot.totals?.gst || 0,
+      _recipientType: 'client',
+      ccEmails,
+    };
+
+    const emailResult = await sendInvoiceEmail({
+      toEmail: String(clientEmail).trim(),
+      invoice: emailPayload,
+      invoiceHTML,
+    });
+
+    return res.json({
+      ok: true,
+      success: true,
+      message: 'Invoice sent to client',
+      sentTo: String(clientEmail).trim(),
+      hasPDF: emailResult.hasPDF,
+      filename: emailResult.filename,
+      messageId: emailResult.messageId,
+    });
+  } catch (err) {
+    logger.error({ error: err.message, stack: err.stack }, '❌ Send-to-client failed');
+    return res.status(500).json({ ok: false, error: err.message || 'Failed to send invoice to client' });
   }
 });
 

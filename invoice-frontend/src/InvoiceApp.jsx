@@ -1057,7 +1057,7 @@ export default function Invoice() {
     setIsPreviewOpen(true);
   };
 
-  const handleShare = async (email) => {
+  const handleShare = async () => {
 
     // ✅ STEP 1: Finalize the invoice first (if not already finalized)
     if (invoice.status !== 'FINAL') {
@@ -1072,7 +1072,7 @@ export default function Invoice() {
       }
     }
 
-    // ✅ STEP 2: Share the invoice
+    // ✅ STEP 2: Send for approval (Hourly + consultant). No client email.
     await new Promise(resolve => setTimeout(resolve, 100));
 
     if (!invoiceRef.current) {
@@ -1081,19 +1081,16 @@ export default function Invoice() {
       return;
     }
 
-    const invoiceHTML = invoiceRef.current.innerHTML;
-
+    const invoiceHTML = invoiceRef.current?.innerHTML || '';
     if (!invoiceHTML || invoiceHTML.trim().length < 100) {
-      console.error('❌ Invoice HTML is too short or empty');
       alert('❌ Invoice content failed to generate.');
       return;
     }
 
     try {
       const result = await shareInvoice({
-        toEmail: email,
+        invoiceId: invoice.invoiceId,
         html: invoiceHTML,
-        invoiceId: invoice.invoiceId || "DRAFT",
         projectCode: invoice.projectCode,
         consultantName: invoice.consultantName,
         total: invoice.total,
@@ -1102,7 +1099,7 @@ export default function Invoice() {
       });
 
       if (result.hasPDF) {
-        toast.success(`✅ Invoice finalized & sent as PDF to ${email}!`, {
+        toast.success(`✅ Sent for approval (PDF attached).`, {
           autoClose: 4000,
           position: 'top-center',
           style: {
@@ -1116,7 +1113,7 @@ export default function Invoice() {
           },
         });
       } else {
-        toast.success(`✅ Invoice finalized & sent to ${email}!`, {
+        toast.success(`✅ Sent for approval.`, {
           autoClose: 4000,
           position: 'top-center',
           style: {
@@ -1687,7 +1684,6 @@ export default function Invoice() {
           gst: invoice.gst,
           total: invoice.total,
         }}
-        clientEmail={clientData?.Client_email || clientData?.email || invoice.clientEmail || ''}
         onShare={handleShare}
       />
     </div>

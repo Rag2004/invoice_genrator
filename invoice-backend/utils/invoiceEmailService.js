@@ -417,6 +417,43 @@ async function sendInvoiceEmail({ toEmail, invoice, invoiceHTML }) {
   const subject = `Invoice ${invoiceNumber} - ${projectCode}`;
 
   // ✅ PROFESSIONAL EMAIL TEMPLATE
+  const recipientType = (invoice && invoice._recipientType) ? String(invoice._recipientType) : 'client';
+  const recipientHeadline =
+    recipientType === 'internal'
+      ? 'Invoice pending approval'
+      : `Invoice ${invoiceNumber}`;
+  const recipientGreeting =
+    recipientType === 'internal'
+      ? 'Hello,'
+      : 'Dear Client,';
+  const introText =
+    recipientType === 'internal'
+      ? 'A new invoice has been generated and is pending approval. Please review the attached PDF.'
+      : 'Thank you for your continued partnership. Please find attached your invoice for the professional services rendered.';
+
+  const approvalLinks = invoice && invoice._approvalLinks ? invoice._approvalLinks : null;
+  const approvalCtaHtml =
+    recipientType === 'internal' && approvalLinks?.approveUrl && approvalLinks?.rejectUrl
+      ? `
+        <div style="margin: 24px 0; padding: 16px; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px;">
+          <div style="font-weight: 700; color: #9a3412; margin-bottom: 10px; font-size: 14px;">
+            Approval required
+          </div>
+          <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+            <a href="${approvalLinks.approveUrl}" style="display:inline-block; padding: 12px 16px; border-radius: 8px; background:#16a34a; color:#ffffff; text-decoration:none; font-weight:700; font-size:14px;">
+              Approve & Send to Client
+            </a>
+            <a href="${approvalLinks.rejectUrl}" style="display:inline-block; padding: 12px 16px; border-radius: 8px; background:#dc2626; color:#ffffff; text-decoration:none; font-weight:700; font-size:14px;">
+              Reject
+            </a>
+          </div>
+          <div style="margin-top: 10px; font-size: 12px; color: #9a3412; text-align: center;">
+            Links expire and can be used once.
+          </div>
+        </div>
+      `
+      : '';
+
   const emailHTML = `
 <!DOCTYPE html>
 <html lang="en">
@@ -578,19 +615,21 @@ async function sendInvoiceEmail({ toEmail, invoice, invoiceHTML }) {
   <div class="container">
     <!-- Header -->
     <div class="header">
-      <h1>Invoice ${invoiceNumber}</h1>
-      <p>Professional Services Invoice</p>
+      <h1>${recipientHeadline}</h1>
+      <p>${recipientType === 'internal' ? 'Approval required' : 'Professional Services Invoice'}</p>
     </div>
 
     <!-- Content -->
     <div class="content">
       <div class="greeting">
-        Dear Client,
+        ${recipientGreeting}
       </div>
 
       <p class="message">
-        Thank you for your continued partnership. Please find attached your invoice for the professional services rendered.
+        ${introText}
       </p>
+
+      ${approvalCtaHtml}
 
       <!-- Invoice Details -->
       <div class="info-box">
@@ -674,7 +713,9 @@ async function sendInvoiceEmail({ toEmail, invoice, invoiceHTML }) {
 
   // Send email (with or without PDF)
   try {
-    const ccEmails = getInvoiceCCEmails();
+    const ccEmails = Array.isArray(invoice?.ccEmails)
+      ? invoice.ccEmails
+      : getInvoiceCCEmails();
 
     const mailOptions = {
       from: `"Hourly Invoices" <${process.env.EMAIL_USER}>`,
@@ -682,7 +723,10 @@ async function sendInvoiceEmail({ toEmail, invoice, invoiceHTML }) {
       cc: ccEmails, // ✅ AUTO CC FROM ENV
       subject: subject,
       html: emailHTML,
-      text: `Invoice ${invoiceNumber}\n\nProject: ${projectCode}\nConsultant: ${consultantName}\nTotal Amount: ${formattedTotal}\n\nPlease view this email in an HTML-compatible client to see the full invoice details. A PDF copy is attached.\n\nBest regards,\n${consultantName}\nHourly.Design`,
+      text:
+        recipientType === 'internal'
+          ? `Invoice pending approval\n\nInvoice: ${invoiceNumber}\nProject: ${projectCode}\nConsultant: ${consultantName}\nTotal Amount: ${formattedTotal}\n\nPlease review the attached PDF.\n\nHourly.Design`
+          : `Invoice ${invoiceNumber}\n\nProject: ${projectCode}\nConsultant: ${consultantName}\nTotal Amount: ${formattedTotal}\n\nPlease view this email in an HTML-compatible client to see the full invoice details. A PDF copy is attached.\n\nBest regards,\n${consultantName}\nHourly.Design`,
     };
 
     // Add PDF attachment if available

@@ -28,6 +28,7 @@ export default function InvoiceComplete({
     stages = [],
     notes = "",
     subtotal: rawSubtotal = 0,
+    gstRate: rawGstRate,
     gst: rawGst,
     total: rawTotal,
     serviceFeePct = 0,
@@ -76,8 +77,10 @@ export default function InvoiceComplete({
   };
 
   const subtotal = Number(rawSubtotal || 0);
-  const gstRate = 0.18;
-  const gst = rawGst != null ? Number(rawGst) : subtotal * gstRate;
+  let gstRate = Number(rawGstRate ?? projectData?.gstRate ?? projectData?.gst ?? projectData?.GST ?? 0);
+  if (!Number.isFinite(gstRate)) gstRate = 0;
+  if (gstRate > 1) gstRate = gstRate / 100;
+  const gst = rawGst != null ? Number(rawGst) : Math.round(subtotal * gstRate);
   const total = rawTotal != null ? Number(rawTotal) : subtotal + gst;
   const serviceFeeAmount = rawServiceFee || 0;
   const netEarnings = rawNetEarnings || Math.max(total - serviceFeeAmount, 0);

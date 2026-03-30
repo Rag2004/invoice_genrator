@@ -491,9 +491,8 @@
 // src/pages/InvoiceListPage.jsx - WITH SHARE DIALOG
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { listInvoices, autoShareInvoice, getInvoice, downloadInvoicePDFFromServer } from "../api/api";
+import { listInvoices, autoShareInvoice, downloadInvoicePDFFromServer } from "../api/api";
 import { useAuth } from "../context/AuthContext";
-import ShareInvoiceDialog from "../components/ui/ShareInvoiceDialog";
 import "../styles/InvoiceList.css";
 
 // ── SVG Icons (matching Dashboard) ─────────────────────────
@@ -531,11 +530,6 @@ export default function InvoiceListPage() {
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState("all");
 
-  // Share dialog state
-  const [shareDialogOpen, setShareDialogOpen] = useState(false);
-  const [selectedInvoice, setSelectedInvoice] = useState(null);
-  const [clientEmail, setClientEmail] = useState("");
-  const [loadingEmail, setLoadingEmail] = useState(false);
   const [sharingInvoiceId, setSharingInvoiceId] = useState(null);
   const [downloadingPdfId, setDownloadingPdfId] = useState(null);
 
@@ -642,94 +636,27 @@ export default function InvoiceListPage() {
     };
   }, [user, logout, navigate]);
 
-  // ✅ STEP 1: Open dialog and fetch client email
-  const handleShareClick = async (invoice) => {
-
-    setSelectedInvoice(invoice);
-    setShareDialogOpen(true);
-    setClientEmail(''); // Reset
-    setLoadingEmail(true);
-
+  // ✅ Send for approval (Hourly + consultant) — no client
+  const handleSendForApproval = async (invoice) => {
+    if (!invoice?.id) return;
+    setSharingInvoiceId(invoice.id);
     try {
-      // Fetch full invoice to get client email from snapshot
-      const result = await getInvoice(invoice.id);
-
-      if (result?.ok && result.invoice) {
-        const fullInvoice = result.invoice;
-
-        // Extract client email from snapshot
-        let email = null;
-
-        if (fullInvoice.snapshot?.client?.email) {
-          email = fullInvoice.snapshot.client.email;
-        } else if (fullInvoice.client?.email) {
-          email = fullInvoice.client.email;
-        }
-        setClientEmail(email || '');
-
-        if (!email) {
-          setError('Client email not found in invoice data');
-        }
-      } else {
-        setClientEmail('');
-        setError('Failed to load invoice details');
-      }
-    } catch (error) {
-      console.error('❌ Error fetching client email:', error);
-      setClientEmail('');
-      setError('Failed to load client email');
-    } finally {
-      setLoadingEmail(false);
-    }
-  };
-
-  // ✅ STEP 2: Send invoice via dialog
-  const handleShareConfirm = async (email) => {
-    if (!selectedInvoice) {
-      alert('❌ No invoice selected');
-      return;
-    }
-
-    if (!email || !email.trim()) {
-      alert('❌ Client email not found. Please update the project with client email and regenerate the invoice.');
-      return;
-    }
-
-    setSharingInvoiceId(selectedInvoice.id);
-
-    try {
-      // Call the auto-share API
-      const result = await autoShareInvoice(selectedInvoice.id);
-
+      const result = await autoShareInvoice(invoice.id);
+      const sentTo = Array.isArray(result.sentTo) ? result.sentTo.join(', ') : String(result.sentTo || '');
       alert(
-        `✅ Invoice ${selectedInvoice.invoiceNumber} sent successfully!\n\n` +
-        `Sent to: ${result.sentTo}\n` +
+        `✅ Sent for approval: ${invoice.invoiceNumber}\n\n` +
+        `Sent to (Hourly): ${sentTo}\n` +
         `${result.hasPDF ? `PDF attached: ${result.filename}` : 'Sent as HTML email'}`
       );
-
-      setShareDialogOpen(false);
-      setSelectedInvoice(null);
-      setClientEmail('');
-
     } catch (error) {
-      console.error('❌ Share error:', error);
-
-      let errorMessage = error.message;
-
-      // Provide helpful error messages
-      if (errorMessage.includes('Client email not found')) {
-        errorMessage = 'Client email not found in invoice.\n\nPlease update the project with client email and regenerate the invoice.';
-      } else if (errorMessage.includes('Can only share finalized')) {
-        errorMessage = 'This invoice must be finalized before sharing.';
-      } else if (errorMessage.includes('Invalid client email format')) {
-        errorMessage = 'The client email in the invoice is invalid.\n\nPlease update the project with a valid email address.';
-      }
-
-      alert(`❌ Failed to send invoice:\n\n${errorMessage}`);
+      console.error('❌ Send-for-approval error:', error);
+      alert(`❌ Failed to send for approval:\n\n${error.message}`);
     } finally {
       setSharingInvoiceId(null);
     }
   };
+
+  // Note: Approval happens via email buttons (Approve/Reject), not in-app.
 
   const formatCurrency = (amount) => {
     try {
@@ -1025,15 +952,15 @@ export default function InvoiceListPage() {
                             <span className="il-action-label">{inv.type === 'final' ? 'View' : 'Edit'}</span>
                           </button>
 
-                          {/* Share */}
+                          {/* Send for approval */}
                           <button
                             className={`il-action-btn il-action-btn--share ${inv.type !== 'final' ? 'il-action-btn--locked' : ''}`}
-                            title={inv.type === 'final' ? 'Share via Email' : 'Finalize to share'}
-                            onClick={inv.type === 'final' ? () => handleShareClick(inv) : undefined}
+                            title={inv.type === 'final' ? 'Send for approval (Hourly + consultant)' : 'Finalize to send'}
+                            onClick={inv.type === 'final' ? () => handleSendForApproval(inv) : undefined}
                             disabled={inv.type !== 'final' || isSharing}
                           >
                             {isSharing ? <span className="il-spin-sm" /> : <MailIcon />}
-                            <span className="il-action-label">Share</span>
+                            <span className="il-action-label">Send</span>
                           </button>
 
                           {/* PDF Download */}
@@ -1056,26 +983,6 @@ export default function InvoiceListPage() {
           </div>
         )}
       </div>
-
-      {/* ✅ SHARE DIALOG */}
-      <ShareInvoiceDialog
-        isOpen={shareDialogOpen}
-        onClose={() => {
-          setShareDialogOpen(false);
-          setSelectedInvoice(null);
-          setClientEmail('');
-        }}
-        invoiceData={{
-          invoiceId: selectedInvoice?.id,
-          invoiceNumber: selectedInvoice?.invoiceNumber || "N/A",
-          projectCode: selectedInvoice?.projectCode || "N/A",
-          subtotal: selectedInvoice?.amount || 0,
-          gst: selectedInvoice?.gst || 0,
-          total: selectedInvoice?.total || 0,
-        }}
-        clientEmail={loadingEmail ? 'Loading...' : clientEmail}
-        onShare={handleShareConfirm}
-      />
     </div>
   );
 }

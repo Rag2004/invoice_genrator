@@ -17,18 +17,12 @@ const ShareInvoiceDialog = ({ isOpen, onClose, invoiceData, clientEmail, onShare
   }, [isOpen]);
 
   const handleShare = async () => {
-    // Validation
-    if (!clientEmail || !clientEmail.trim()) {
-      setError('Client email not found. Please check project configuration.');
-      return;
-    }
-
     setError('');
     setIsLoading(true);
 
     try {
-      // Call the parent's onShare function with client email
-      await onShare(clientEmail);
+      // Send for approval (Hourly + consultant). No client email.
+      await onShare();
       setSuccess(true);
       
       // Auto-close after 2 seconds on success
@@ -170,7 +164,7 @@ const ShareInvoiceDialog = ({ isOpen, onClose, invoiceData, clientEmail, onShare
               fontWeight: '500',
               margin: 0,
             }}>
-              Invoice sent successfully to {clientEmail}!
+              Invoice sent for approval successfully!
             </p>
           </div>
         )}
@@ -217,7 +211,7 @@ const ShareInvoiceDialog = ({ isOpen, onClose, invoiceData, clientEmail, onShare
           </div>
         </div>
 
-        {/* Client Email Display */}
+        {/* Recipient Info */}
         <div style={{ marginBottom: '16px' }}>
           <label
             style={{
@@ -228,7 +222,7 @@ const ShareInvoiceDialog = ({ isOpen, onClose, invoiceData, clientEmail, onShare
               marginBottom: '8px',
             }}
           >
-            Recipient (Client Email)
+            Recipients
           </label>
           <div
             style={{
@@ -259,56 +253,19 @@ const ShareInvoiceDialog = ({ isOpen, onClose, invoiceData, clientEmail, onShare
                 d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
               />
             </svg>
-            <span>{clientEmail || 'No client email found'}</span>
+            <span>Hourly (ADMIN_CC_EMAIL) + Consultant</span>
           </div>
-          {clientEmail && (
-            <p style={{
-              marginTop: '8px',
-              fontSize: '12px',
-              color: '#6b7280',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              margin: '8px 0 0 0',
-            }}>
-              <svg
-                style={{ width: '14px', height: '14px' }}
-                fill="currentColor"
-                viewBox="0 0 20 20"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              Invoice will be sent to client email from project data
-            </p>
-          )}
-          {!clientEmail && (
-            <p style={{
-              marginTop: '8px',
-              fontSize: '12px',
-              color: '#dc2626',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              margin: '8px 0 0 0',
-            }}>
-              <svg
-                style={{ width: '14px', height: '14px' }}
-                fill="currentColor"
-                viewBox="0 0 20 20"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              Client email not available in project data
-            </p>
-          )}
+          <p style={{
+            marginTop: '8px',
+            fontSize: '12px',
+            color: '#6b7280',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            margin: '8px 0 0 0',
+          }}>
+            This sends the invoice for approval. Use the invoice list to send to the client after approval.
+          </p>
         </div>
 
         {/* Error Message */}
@@ -372,17 +329,17 @@ const ShareInvoiceDialog = ({ isOpen, onClose, invoiceData, clientEmail, onShare
           </button>
           <button
             onClick={handleShare}
-            disabled={isLoading || success || !clientEmail}
+            disabled={isLoading || success}
             style={{
               padding: '10px 16px',
               fontSize: '14px',
               fontWeight: '500',
               color: 'white',
-              backgroundColor: !clientEmail ? '#9ca3af' : '#3b82f6',
+              backgroundColor: '#3b82f6',
               border: 'none',
               borderRadius: '8px',
-              cursor: isLoading || success || !clientEmail ? 'not-allowed' : 'pointer',
-              opacity: isLoading || success || !clientEmail ? 0.6 : 1,
+              cursor: isLoading || success ? 'not-allowed' : 'pointer',
+              opacity: isLoading || success ? 0.6 : 1,
               transition: 'all 0.2s',
               display: 'flex',
               alignItems: 'center',
@@ -391,10 +348,10 @@ const ShareInvoiceDialog = ({ isOpen, onClose, invoiceData, clientEmail, onShare
               justifyContent: 'center',
             }}
             onMouseEnter={(e) => {
-              if (!isLoading && !success && clientEmail) e.target.style.backgroundColor = '#2563eb';
+              if (!isLoading && !success) e.target.style.backgroundColor = '#2563eb';
             }}
             onMouseLeave={(e) => {
-              if (clientEmail) e.target.style.backgroundColor = '#3b82f6';
+              e.target.style.backgroundColor = '#3b82f6';
             }}
           >
             {isLoading ? (
@@ -457,7 +414,7 @@ const ShareInvoiceDialog = ({ isOpen, onClose, invoiceData, clientEmail, onShare
                     d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
                   />
                 </svg>
-                Send Invoice
+                Send for approval
               </>
             )}
           </button>
