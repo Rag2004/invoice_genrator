@@ -41,6 +41,31 @@ function isValidEmail(email) {
   return !!email && emailRegex.test(String(email).trim());
 }
 
+function normalizeGstRate(raw) {
+  let r = Number(raw ?? 0);
+  if (!Number.isFinite(r)) r = 0;
+  if (r > 1) r = r / 100;
+  return r;
+}
+
+function recomputeSnapshotTotals(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return snapshot;
+  const totals = snapshot.totals || {};
+  const items = snapshot.work?.items || [];
+  const subtotal = Number(totals.subtotal ?? items.reduce((s, it) => s + Number(it?.amount || 0), 0)) || 0;
+  const gstRate = normalizeGstRate(
+    totals.gstRate ??
+    snapshot.project?.gstRate ??
+    snapshot.project?.gst ??
+    snapshot.project?.GST ??
+    0
+  );
+  const gst = Math.round(subtotal * gstRate);
+  const total = subtotal + gst;
+  snapshot.totals = { ...totals, subtotal, gstRate, gst, total };
+  return snapshot;
+}
+
 function getBackendBaseUrl(req) {
   const envUrl = process.env.BACKEND_PUBLIC_URL;
   if (envUrl) return String(envUrl).replace(/\/+$/, '');
@@ -1040,6 +1065,7 @@ router.post('/send-to-client', async (req, res) => {
       logger.error({ invoiceId, error: err.message }, '❌ Failed to parse snapshot');
       return res.status(400).json({ ok: false, error: 'Invalid invoice snapshot format' });
     }
+    snapshot = recomputeSnapshotTotals(snapshot);
 
     const clientEmail = snapshot?.client?.email;
     if (!isValidEmail(clientEmail)) {
