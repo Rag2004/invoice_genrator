@@ -1619,4 +1619,6 @@ function generateInvoiceHTMLFromSnapshot(snapshot) {
   `.trim();
 }
 
+// Export router (default) + internal helper for public approval routes
 module.exports = router;
+module.exports._generateInvoiceHTMLFromSnapshot = generateInvoiceHTMLFromSnapshot;

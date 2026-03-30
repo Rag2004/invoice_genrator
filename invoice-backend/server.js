@@ -62,6 +62,7 @@ const projectsRouter = require('./routes/projects');     // ✅ ADDED
 const clientsRouter = require('./routes/clients');       // ✅ ADDED
 const teamRouter = require('./routes/team');             // ✅ ADDED
 const invoicesRouter = require('./routes/invoices');
+const invoiceApprovalRouter = require('./routes/invoiceApproval');
 const draftsRouter = require('./routes/drafts');         // ✅ ADDED (if exists)
 const dashboardRouter = require('./routes/dashboard');
 const modesRouter = require('./routes/modes');
@@ -73,6 +74,8 @@ app.use('/api/auth', authRouter);
 app.use('/api/projects', projectsRouter); // ✅ ADDED - Handles /setup endpoint
 app.use('/api/clients', authMiddleware, clientsRouter);    // ✅ ADDED
 app.use('/api/team', authMiddleware, teamRouter);          // ✅ ADDED
+// Public approval links (no login required)
+app.use('/api/invoices/approval', invoiceApprovalRouter);
 app.use('/api/invoices', authMiddleware, invoicesRouter);
 app.use('/api/dashboard', authMiddleware, dashboardRouter);
 app.use('/api/modes', authMiddleware, modesRouter);
