@@ -309,35 +309,23 @@ router.post('/finalize', async (req, res) => {
     }
 
     // ------------------------------------------------------------------
-    // 3️⃣ AUDIT TOTALS (DO NOT OVERRIDE FRONTEND)
+    // 3️⃣ CANONICAL TOTALS (RECOMPUTE FROM ITEMS + RATE)
     // ------------------------------------------------------------------
-    const items = snapshot.work.items;
+    const beforeTotals = snapshot.totals || {};
+    const canonicalSnapshot = recomputeSnapshotTotals(snapshot);
 
-    const auditSubtotal = items.reduce(
-      (sum, i) => sum + Number(i.amount || 0),
-      0
-    );
-
-    // Respect GST rate from snapshot when present (0 is valid)
-    let auditGstRate = snapshot.totals?.gstRate;
-    if (auditGstRate == null && snapshot.totals?.gst != null && auditSubtotal > 0) {
-      auditGstRate = Number(snapshot.totals.gst) / auditSubtotal;
-    }
-    auditGstRate = Number(auditGstRate ?? 0.18);
-    if (!Number.isFinite(auditGstRate)) auditGstRate = 0.18;
-    if (auditGstRate > 1) auditGstRate = auditGstRate / 100;
-
-    const auditGst = Math.round(auditSubtotal * auditGstRate);
-    const auditTotal = auditSubtotal + auditGst;
-
-    if (Math.abs(auditTotal - Number(snapshot.totals?.total || 0)) > 1) {
+    if (
+      beforeTotals &&
+      beforeTotals.total != null &&
+      Math.abs(Number(beforeTotals.total || 0) - Number(canonicalSnapshot.totals?.total || 0)) > 1
+    ) {
       logger.warn(
         {
           invoiceId: invoiceId || 'NEW',
-          frontendTotal: snapshot.totals?.total,
-          backendAuditTotal: auditTotal
+          frontendTotal: beforeTotals.total,
+          recomputedTotal: canonicalSnapshot.totals?.total
         },
-        '⚠️ TOTAL MISMATCH (trusting frontend snapshot)'
+        '⚠️ TOTAL MISMATCH (using recomputed canonical totals)'
       );
     }
 
@@ -351,9 +339,9 @@ router.post('/finalize', async (req, res) => {
       consultantId,
       status: 'FINAL',
       snapshot: {
-        ...snapshot,
+        ...canonicalSnapshot,
         meta: {
-          ...snapshot.meta,
+          ...(canonicalSnapshot.meta || {}),
           invoiceId: finalInvoiceId,
           status: 'FINAL',
           finalizedAt: new Date().toISOString()
