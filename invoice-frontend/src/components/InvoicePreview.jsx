@@ -69,6 +69,7 @@ export default function InvoicePreview({ invoice = {}, projectData, clientData }
   const subtotal = Number(data.subtotal || 0);
   const gst = Number(data.gst || 0);
   const total = Number(data.total || 0);
+  const gstRate = subtotal > 0 ? gst / subtotal : 0;
   
   const svcFraction = percentToFraction(data.serviceFeePct);
   const serviceFeeAmount = Math.round(total * svcFraction);
@@ -317,7 +318,7 @@ export default function InvoicePreview({ invoice = {}, projectData, clientData }
                   <span>{formatMoney(subtotal)}</span>
                 </div>
                 <div className="summary-line gst">
-                  <span>GST (18%)</span>
+                  <span>GST ({Math.round((gstRate || 0) * 100)}%)</span>
                   <span>{formatMoney(gst)}</span>
                 </div>
                 <div className="summary-line total">

@@ -792,7 +792,9 @@ export default function InvoiceComplete({
                         <div className="totals-value">{formatINR(0)}</div>
                       </div>
                       <div className="totals-row tax">
-                        <div className="totals-label">Tax (GST 18%)</div>
+                        <div className="totals-label">
+                          Tax (GST {Math.round((gstRate || 0) * 100)}%)
+                        </div>
                         <div className="totals-value">{formatINR(gst)}</div>
                       </div>
                       <div className="totals-row total">
@@ -839,6 +841,11 @@ export default function InvoiceComplete({
             <div className="balance-value">{formatINR(total)}</div>
           </div>
           <div className="signature-card">
+            {logoUrl && (
+              <div style={{ marginBottom: 16 }}>
+                <img src={logoUrl} alt="Logo" style={{ maxHeight: 40 }} />
+              </div>
+            )}
             <div className="signature-label">Authorized Signature</div>
             <div className="signature-line">{serviceProvider.companyName}</div>
           </div>

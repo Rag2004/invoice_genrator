@@ -5,7 +5,7 @@ export default function NotesAndTotals({ invoice = {}, updateInvoice }) {
 
   // Try to be flexible with whatever you already have
   const subtotal = totals.subtotal || 0;
-  const gstRate = totals.gstRate ?? 0.18; // default 18%
+  const gstRate = totals.gstRate ?? 0; // default 0% if not provided
   const gstAmount = totals.gstAmount || subtotal * gstRate;
 
   // Total that client sees

@@ -13,13 +13,15 @@ export default function SummaryActions({
   team,
   notes,
   serviceFeePct,
+  gstRate = 0,
 }) {
   const [saving, setSaving] = useState(false);
   const [invoiceNumber, setInvoiceNumber] = useState(null);
 
   // Calculate totals
   const subtotal = team.reduce((sum, m) => sum + m.hours * m.rate, 0);
-  const gst = subtotal * 0.18;
+  const normalizedGstRate = gstRate > 1 ? gstRate / 100 : gstRate || 0;
+  const gst = subtotal * normalizedGstRate;
   const total = subtotal + gst;
 
   const formatCurrency = (amount) => {

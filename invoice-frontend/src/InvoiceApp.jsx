@@ -85,10 +85,10 @@ const recalc = (draft) => {
 
   const subtotal = items.reduce((sum, item) => sum + item.amount, 0);
 
-  // ✅ FIX: Normalize GST rate - convert percentage to decimal if needed
-  let gstRate = Number(draft.gstRate ?? 0.18);
+  // ✅ Normalize GST rate - convert percentage to decimal if needed (no hardcoded default)
+  let gstRate = Number(draft.gstRate ?? 0);
   if (gstRate > 1) {
-    gstRate = gstRate / 100; // Convert 20 → 0.20, 18 → 0.18
+    gstRate = gstRate / 100; // Convert 20 → 0.20
   }
 
   const gst = Math.round(subtotal * gstRate);
@@ -186,7 +186,7 @@ export default function Invoice() {
     items: [],
     notes: "",
     subtotal: 0,
-    gstRate: 0.18,
+    gstRate: 0,
     gst: 0,
     total: 0,
     serviceFeePct: 25,
@@ -539,8 +539,8 @@ export default function Invoice() {
           baseHourlyRate: draft.config?.baseHourlyRate || draft.baseHourlyRate || 0,
           serviceFeePct: draft.config?.serviceFeePct || draft.serviceFeePct || 25,
           gstRate: (() => {
-            // ✅ FIX: Normalize GST from draft
-            let gst = draft.config?.gstRate ?? draft.gstRate ?? 0.18;
+            // ✅ Normalize GST from draft (no hardcoded default)
+            let gst = draft.config?.gstRate ?? draft.gstRate ?? 0;
             return gst > 1 ? gst / 100 : gst;
           })(),
         };
@@ -668,9 +668,9 @@ export default function Invoice() {
           baseHourlyRate: res.project.hourlyRate,
           serviceFeePct: incomingServiceFeeToPercent(res.project.serviceFeePct),
           gstRate: (() => {
-            // ✅ FIX: Normalize GST - convert percentage to decimal if needed
+            // ✅ Normalize GST - convert percentage to decimal if needed
             // Use undefined coalescing (??) instead of logical OR (||) to treat 0 as valid
-            let rawGst = res.project?.gst ?? res.project?.GST ?? 0.18;
+            let rawGst = res.project?.gst ?? res.project?.GST ?? 0;
             let gst = Number(rawGst);
             return gst > 1 ? gst / 100 : gst;
           })(),
@@ -1383,8 +1383,10 @@ export default function Invoice() {
             </div>
 
             <div className="rigid-data-box">
-              <div className="rigid-label">GST % (Fixed)</div>
-              <div className="rigid-value">{Math.round((invoice.gstRate ?? 0.18) * 100)}%</div>
+              <div className="rigid-label">GST %</div>
+              <div className="rigid-value">
+                {Math.round(((invoice.gstRate ?? 0) || 0) * 100)}%
+              </div>
             </div>
           </div>
         </div>
