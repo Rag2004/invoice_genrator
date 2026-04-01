@@ -41,6 +41,7 @@ export default function InvoicePreview({ invoice = {}, projectData, clientData }
       subtotal: snapshot.totals?.subtotal || 0,
       gst: snapshot.totals?.gst || 0,
       total: snapshot.totals?.total || 0,
+      gstRate: snapshot.totals?.gstRate, // percentage or fraction, may be 0
       serviceFeePct: snapshot.totals?.serviceFeePct || 0,
       invoiceNumber: snapshot.meta?.invoiceNumber || invoice.invoiceNumber || '',
     };
@@ -58,6 +59,7 @@ export default function InvoicePreview({ invoice = {}, projectData, clientData }
       subtotal: invoice.subtotal || 0,
       gst: invoice.gst || 0,
       total: invoice.total || 0,
+      gstRate: invoice.gstRate, // percentage or fraction, may be 0
       serviceFeePct: invoice.serviceFeePct || 0,
       invoiceNumber: invoice.invoiceNumber || '',
     };
@@ -67,9 +69,21 @@ export default function InvoicePreview({ invoice = {}, projectData, clientData }
   // CALCULATIONS
   // ============================================================================
   const subtotal = Number(data.subtotal || 0);
-  const gst = Number(data.gst || 0);
   const total = Number(data.total || 0);
-  const gstRate = subtotal > 0 ? gst / subtotal : 0;
+
+  // Respect explicit gstRate from snapshot/flat data; fall back to deriving from gst/subtotal
+  let gstRate = 0;
+  if (data.gstRate != null) {
+    const raw = Number(data.gstRate);
+    if (!Number.isNaN(raw)) {
+      gstRate = raw > 1 ? raw / 100 : raw;
+    }
+  } else if (subtotal > 0 && data.gst) {
+    gstRate = Number(data.gst) / subtotal;
+  }
+  if (!Number.isFinite(gstRate) || gstRate < 0) gstRate = 0;
+
+  const gst = Math.round(subtotal * gstRate);
   
   const svcFraction = percentToFraction(data.serviceFeePct);
   const serviceFeeAmount = Math.round(total * svcFraction);

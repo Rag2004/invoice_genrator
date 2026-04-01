@@ -933,7 +933,8 @@ export default function InvoiceListPage() {
                       </td>
                       <td className="il-client">{inv.clientName}</td>
                       <td><span className="il-project-tag">{inv.projectCode}</span></td>
-                      <td className="il-amount">{formatCurrency(inv.total)}</td>
+                      {/* Show amount before tax in list view */}
+                      <td className="il-amount">{formatCurrency(inv.amount)}</td>
                       <td className="il-date">{formatDate(inv.date)}</td>
                       <td>
                         <span className={badge.class}>

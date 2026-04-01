@@ -191,9 +191,12 @@ router.get('/approve', async (req, res) => {
     const token = req.query.token;
     const v = verifyApprovalToken(token);
     if (!v.ok) {
+      const isUsed = String(v.error || '').toLowerCase().includes('used');
       return res.status(400).send(renderStatusPage({
-        title: 'Invalid approval link',
-        message: `This link is ${v.error}. Please request a fresh approval email.`,
+        title: isUsed ? 'Invoice already processed' : 'Invalid approval link',
+        message: isUsed
+          ? 'This invoice has already been processed. If you need to make changes, please ask the consultant to re-send it for approval.'
+          : `This link is ${v.error}. Please request a fresh approval email.`,
         variant: 'error',
       }));
     }
@@ -285,9 +288,12 @@ router.get('/reject', async (req, res) => {
     const token = req.query.token;
     const v = verifyApprovalToken(token);
     if (!v.ok) {
+      const isUsed = String(v.error || '').toLowerCase().includes('used');
       return res.status(400).send(renderStatusPage({
-        title: 'Invalid rejection link',
-        message: `This link is ${v.error}. Please request a fresh approval email.`,
+        title: isUsed ? 'Invoice already processed' : 'Invalid rejection link',
+        message: isUsed
+          ? 'This invoice has already been processed. If you need to make changes, please ask the consultant to re-send it for approval.'
+          : `This link is ${v.error}. Please request a fresh approval email.`,
         variant: 'error',
       }));
     }
