@@ -186,30 +186,8 @@ function renderStatusPage({ title, message, variant = 'success' }) {
   `.trim();
 }
 
-router.get('/approve', async (req, res) => {
-  try {
-    const token = req.query.token;
-    const v = verifyApprovalToken(token);
-    if (!v.ok) {
-      const isUsed = String(v.error || '').toLowerCase().includes('used');
-      return res.status(400).send(renderStatusPage({
-        title: isUsed ? 'Invoice already processed' : 'Invalid approval link',
-        message: isUsed
-          ? 'This invoice has already been processed. If you need to make changes, please ask the consultant to re-send it for approval.'
-          : `This link is ${v.error}. Please request a fresh approval email.`,
-        variant: 'error',
-      }));
-    }
-    if (v.payload.action !== 'approve') {
-      return res.status(400).send(renderStatusPage({
-        title: 'Invalid action',
-        message: 'This approval link is not valid. Please request a fresh approval email.',
-        variant: 'error',
-      }));
-    }
-    markTokenUsed(v.payload.nonce);
-
-    const invoiceId = v.payload.invoiceId;
+async function handleApproveToken(v, res) {
+  const invoiceId = v.payload.invoiceId;
     const invoiceResult = await apps.getInvoiceById(invoiceId);
     if (!invoiceResult?.ok) {
       return res.status(404).send(renderStatusPage({
@@ -273,6 +251,99 @@ router.get('/approve', async (req, res) => {
       message: 'Invoice has been approved and sent to the client.',
       variant: 'success',
     }));
+}
+
+router.get('/approve', async (req, res) => {
+  try {
+    const token = req.query.token;
+    const v = verifyApprovalToken(token);
+    if (!v.ok) {
+      const isUsed = String(v.error || '').toLowerCase().includes('used');
+      return res.status(400).send(renderStatusPage({
+        title: isUsed ? 'Invoice already processed' : 'Invalid approval link',
+        message: isUsed
+          ? 'This invoice has already been processed. If you need to make changes, please ask the consultant to re-send it for approval.'
+          : `This link is ${v.error}. Please request a fresh approval email.`,
+        variant: 'error',
+      }));
+    }
+    if (v.payload.action !== 'approve') {
+      return res.status(400).send(renderStatusPage({
+        title: 'Invalid action',
+        message: 'This approval link is not valid. Please request a fresh approval email.',
+        variant: 'error',
+      }));
+    }
+
+    // Preview page with POST form; do not mark token used or send email yet.
+    return res.send(`
+      <!doctype html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <title>Approve invoice</title>
+          <style>
+            body { margin:0; font-family: system-ui, -apple-system, Segoe UI, sans-serif; background:#f8fafc; color:#0f172a; }
+            .wrap { min-height:100vh; display:grid; place-items:center; padding:24px; }
+            .card { width:100%; max-width:520px; background:white; border-radius:16px; border:1px solid #e2e8f0; box-shadow:0 20px 60px rgba(15,23,42,0.08); padding:22px 22px 20px; }
+            h1 { font-size:20px; margin:0 0 8px; }
+            p { margin:0 0 12px; font-size:14px; line-height:1.6; color:#334155; }
+            form { margin-top:16px; display:flex; gap:10px; }
+            button { flex:1; border-radius:10px; border:none; padding:10px 14px; font-weight:700; cursor:pointer; }
+            .primary { background:#16a34a; color:white; }
+            .secondary { background:white; color:#0f172a; border:1px solid #e2e8f0; }
+          </style>
+        </head>
+        <body>
+          <div class="wrap">
+            <div class="card">
+              <h1>Approve invoice?</h1>
+              <p>Review this invoice in Hourly if needed, then click Approve to send it to the client.</p>
+              <form method="POST" action="/api/invoices/approval/approve">
+                <input type="hidden" name="token" value="${escapeHtml(token)}" />
+                <button type="submit" class="primary">Approve &amp; send to client</button>
+                <button type="button" class="secondary" onclick="window.close()">Cancel</button>
+              </form>
+            </div>
+          </div>
+        </body>
+      </html>
+    `.trim());
+  } catch (err) {
+    logger.error({ err: err.message, stack: err.stack }, 'Approval approve preview failed');
+    return res.status(500).send(renderStatusPage({
+      title: 'Something went wrong',
+      message: err.message || 'Unexpected error',
+      variant: 'error',
+    }));
+  }
+});
+
+router.post('/approve', async (req, res) => {
+  try {
+    const token = req.body?.token || req.query.token;
+    const v = verifyApprovalToken(token);
+    if (!v.ok) {
+      const isUsed = String(v.error || '').toLowerCase().includes('used');
+      return res.status(400).send(renderStatusPage({
+        title: isUsed ? 'Invoice already processed' : 'Invalid approval link',
+        message: isUsed
+          ? 'This approval link has already been used. If you made further changes, please ask the consultant to re-send the invoice for approval.'
+          : `This link is ${v.error}. Please request a fresh approval email.`,
+        variant: 'error',
+      }));
+    }
+    if (v.payload.action !== 'approve') {
+      return res.status(400).send(renderStatusPage({
+        title: 'Invalid action',
+        message: 'This approval link is not valid. Please request a fresh approval email.',
+        variant: 'error',
+      }));
+    }
+
+    markTokenUsed(v.payload.nonce);
+    return handleApproveToken(v, res);
   } catch (err) {
     logger.error({ err: err.message, stack: err.stack }, 'Approval approve failed');
     return res.status(500).send(renderStatusPage({
@@ -283,30 +354,8 @@ router.get('/approve', async (req, res) => {
   }
 });
 
-router.get('/reject', async (req, res) => {
-  try {
-    const token = req.query.token;
-    const v = verifyApprovalToken(token);
-    if (!v.ok) {
-      const isUsed = String(v.error || '').toLowerCase().includes('used');
-      return res.status(400).send(renderStatusPage({
-        title: isUsed ? 'Invoice already processed' : 'Invalid rejection link',
-        message: isUsed
-          ? 'This invoice has already been processed. If you need to make changes, please ask the consultant to re-send it for approval.'
-          : `This link is ${v.error}. Please request a fresh approval email.`,
-        variant: 'error',
-      }));
-    }
-    if (v.payload.action !== 'reject') {
-      return res.status(400).send(renderStatusPage({
-        title: 'Invalid action',
-        message: 'This rejection link is not valid. Please request a fresh approval email.',
-        variant: 'error',
-      }));
-    }
-    markTokenUsed(v.payload.nonce);
-
-    const invoiceId = v.payload.invoiceId;
+async function handleRejectToken(v, res) {
+  const invoiceId = v.payload.invoiceId;
     const invoiceResult = await apps.getInvoiceById(invoiceId);
     if (!invoiceResult?.ok) {
       return res.status(404).send(renderStatusPage({
@@ -372,6 +421,99 @@ router.get('/reject', async (req, res) => {
       message: 'Invoice has been rejected. The consultant has been notified.',
       variant: 'success',
     }));
+}
+
+router.get('/reject', async (req, res) => {
+  try {
+    const token = req.query.token;
+    const v = verifyApprovalToken(token);
+    if (!v.ok) {
+      const isUsed = String(v.error || '').toLowerCase().includes('used');
+      return res.status(400).send(renderStatusPage({
+        title: isUsed ? 'Invoice already processed' : 'Invalid rejection link',
+        message: isUsed
+          ? 'This invoice has already been processed. If you need to make changes, please ask the consultant to re-send it for approval.'
+          : `This link is ${v.error}. Please request a fresh approval email.`,
+        variant: 'error',
+      }));
+    }
+    if (v.payload.action !== 'reject') {
+      return res.status(400).send(renderStatusPage({
+        title: 'Invalid action',
+        message: 'This rejection link is not valid. Please request a fresh approval email.',
+        variant: 'error',
+      }));
+    }
+
+    // Preview page with POST form; do not mark token used or send emails yet.
+    return res.send(`
+      <!doctype html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <title>Reject invoice</title>
+          <style>
+            body { margin:0; font-family: system-ui, -apple-system, Segoe UI, sans-serif; background:#f8fafc; color:#0f172a; }
+            .wrap { min-height:100vh; display:grid; place-items:center; padding:24px; }
+            .card { width:100%; max-width:520px; background:white; border-radius:16px; border:1px solid #e2e8f0; box-shadow:0 20px 60px rgba(15,23,42,0.08); padding:22px 22px 20px; }
+            h1 { font-size:20px; margin:0 0 8px; }
+            p { margin:0 0 12px; font-size:14px; line-height:1.6; color:#334155; }
+            form { margin-top:16px; display:flex; gap:10px; }
+            button { flex:1; border-radius:10px; border:none; padding:10px 14px; font-weight:700; cursor:pointer; }
+            .danger { background:#dc2626; color:white; }
+            .secondary { background:white; color:#0f172a; border:1px solid #e2e8f0; }
+          </style>
+        </head>
+        <body>
+          <div class="wrap">
+            <div class="card">
+              <h1>Reject invoice?</h1>
+              <p>This will notify the consultant and Hourly that the invoice was rejected so it can be revised.</p>
+              <form method="POST" action="/api/invoices/approval/reject">
+                <input type="hidden" name="token" value="${escapeHtml(token)}" />
+                <button type="submit" class="danger">Reject invoice</button>
+                <button type="button" class="secondary" onclick="window.close()">Cancel</button>
+              </form>
+            </div>
+          </div>
+        </body>
+      </html>
+    `.trim());
+  } catch (err) {
+    logger.error({ err: err.message, stack: err.stack }, 'Approval reject preview failed');
+    return res.status(500).send(renderStatusPage({
+      title: 'Something went wrong',
+      message: err.message || 'Unexpected error',
+      variant: 'error',
+    }));
+  }
+});
+
+router.post('/reject', async (req, res) => {
+  try {
+    const token = req.body?.token || req.query.token;
+    const v = verifyApprovalToken(token);
+    if (!v.ok) {
+      const isUsed = String(v.error || '').toLowerCase().includes('used');
+      return res.status(400).send(renderStatusPage({
+        title: isUsed ? 'Invoice already processed' : 'Invalid rejection link',
+        message: isUsed
+          ? 'This rejection link has already been used. If you made further changes, please ask the consultant to re-send the invoice for approval.'
+          : `This link is ${v.error}. Please request a fresh approval email.`,
+        variant: 'error',
+      }));
+    }
+    if (v.payload.action !== 'reject') {
+      return res.status(400).send(renderStatusPage({
+        title: 'Invalid action',
+        message: 'This rejection link is not valid. Please request a fresh approval email.',
+        variant: 'error',
+      }));
+    }
+
+    markTokenUsed(v.payload.nonce);
+    return handleRejectToken(v, res);
   } catch (err) {
     logger.error({ err: err.message, stack: err.stack }, 'Approval reject failed');
     return res.status(500).send(renderStatusPage({
