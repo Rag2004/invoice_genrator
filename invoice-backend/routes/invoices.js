@@ -1136,8 +1136,14 @@ router.post('/send-to-client', async (req, res) => {
 
 /* ============================================================================
    HELPER: Generate Invoice HTML from Snapshot
+   Uses recomputeSnapshotTotals so GST is derived from gstRate/project config,
+   not from stale stored gst/total values (handles 0% GST correctly).
 ============================================================================ */
 function generateInvoiceHTMLFromSnapshot(snapshot) {
+  const normalizedSnapshot = recomputeSnapshotTotals(
+    snapshot && typeof snapshot === 'object' ? { ...snapshot } : snapshot
+  );
+
   const formatINR = (value) => {
     return new Intl.NumberFormat("en-IN", {
       style: "currency",
@@ -1146,17 +1152,17 @@ function generateInvoiceHTMLFromSnapshot(snapshot) {
     }).format(Number(value || 0));
   };
 
-  const meta = snapshot.meta || {};
-  const consultant = snapshot.consultant || {};
-  const client = snapshot.client || {};
-  const work = snapshot.work || {};
+  const meta = normalizedSnapshot.meta || {};
+  const consultant = normalizedSnapshot.consultant || {};
+  const client = normalizedSnapshot.client || {};
+  const work = normalizedSnapshot.work || {};
   const stages = work.stages || [];
   const items = work.items || [];
-  const totals = snapshot.totals || {};
-  const serviceProvider = snapshot.serviceProvider || {};
-  const compliance = snapshot.compliance || {};
-  const project = snapshot.project || {};
-  const notes = snapshot.notes || '';
+  const totals = normalizedSnapshot.totals || {};
+  const serviceProvider = normalizedSnapshot.serviceProvider || {};
+  const compliance = normalizedSnapshot.compliance || {};
+  const project = normalizedSnapshot.project || {};
+  const notes = normalizedSnapshot.notes || '';
 
   // Helper to check if value is truly empty
   const isEmpty = (val) => val === "" || val === null || val === undefined;

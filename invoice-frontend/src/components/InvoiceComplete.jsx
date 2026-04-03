@@ -2,6 +2,12 @@
 import React from "react";
 import logoDataUrl from "../assets/1.png?inline";
 
+function normalizeGstRate(raw) {
+  let r = Number(raw ?? 0);
+  if (!Number.isFinite(r) || r < 0) r = 0;
+  if (r > 1) r = r / 100;
+  return r;
+}
 
 function formatINR(value) {
   return new Intl.NumberFormat("en-IN", {
@@ -36,7 +42,43 @@ export default function InvoiceComplete({ invoice = {} }) {
   const work = snapshot.work || {};
   const stages = work.stages || [];
   const items = work.items || [];
-  const totals = snapshot.totals || {};
+
+  // ============================================================================
+  // TOTALS (RECOMPUTED TO HONOR gstRate / 0% PROJECTS)
+  // ============================================================================
+  const rawTotals = snapshot.totals || {};
+  const subtotalBase =
+    rawTotals.subtotal ??
+    items.reduce((sum, it) => sum + Number(it?.amount || 0), 0);
+
+  const subtotal = Number(subtotalBase || 0);
+
+  let gstRate = normalizeGstRate(
+    rawTotals.gstRate ??
+      snapshot.project?.gstRate ??
+      snapshot.project?.gst ??
+      snapshot.project?.GST ??
+      null
+  );
+
+  if (gstRate == null || !Number.isFinite(gstRate) || gstRate < 0) {
+    gstRate =
+      subtotal > 0 && rawTotals.gst
+        ? Number(rawTotals.gst) / subtotal
+        : 0;
+    gstRate = normalizeGstRate(gstRate);
+  }
+
+  const gst = Math.round(subtotal * gstRate);
+  const total = subtotal + gst;
+
+  const totals = {
+    ...rawTotals,
+    subtotal,
+    gstRate,
+    gst,
+    total,
+  };
   const compliance = snapshot.compliance || {};
   const consultant = snapshot.consultant || {};
   const client = snapshot.client || {};
@@ -60,9 +102,6 @@ export default function InvoiceComplete({ invoice = {} }) {
 
   const sacCode = compliance.sacCode || "";
   const supplyDescription = compliance.supplyDescription || "";
-  const subtotal = totals.subtotal || 0;
-  const gst = totals.gst || 0;
-  const total = totals.total || 0;
 
   // ✅ Helper to check if value is truly empty (handles "", null, undefined)
   const isEmpty = (val) => val === "" || val === null || val === undefined;
