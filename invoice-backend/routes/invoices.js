@@ -358,7 +358,9 @@ router.post('/finalize', async (req, res) => {
         subtotal: snapshot.totals?.subtotal,
         gst: snapshot.totals?.gst,
         total: snapshot.totals?.total,
-        items: items.length
+        itemCount: Array.isArray(canonicalSnapshot.work?.items)
+          ? canonicalSnapshot.work.items.length
+          : 0
       },
       'FINALIZE → saveInvoice'
     );
@@ -424,7 +426,34 @@ router.get('/', async (req, res) => {
       return res.status(500).json({ ok: false, invoices: [] });
     }
 
-    return res.json({ ok: true, invoices: result.invoices || [] });
+    const normalized = (result.invoices || []).map((raw) => {
+      const status =
+        String(
+          raw.status ||
+          raw.Status ||
+          raw.invoiceStatus ||
+          raw.Invoice_Status ||
+          'DRAFT'
+        ).toUpperCase();
+
+      const invoiceNumber =
+        raw.invoiceNumber ||
+        raw.Invoice_Number ||
+        raw.invoice_no ||
+        raw.Invoice_No ||
+        null;
+
+      const invoiceId = raw.invoiceId || raw.id || raw.Invoice_Id || raw.InvoiceID;
+
+      return {
+        ...raw,
+        invoiceId,
+        status,
+        invoiceNumber
+      };
+    });
+
+    return res.json({ ok: true, invoices: normalized });
   } catch (err) {
     logger.error(err, 'List invoices failed');
     return res.status(500).json({ ok: false, invoices: [] });

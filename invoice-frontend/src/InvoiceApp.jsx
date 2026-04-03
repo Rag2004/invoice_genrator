@@ -1016,18 +1016,28 @@ export default function Invoice() {
         throw new Error(result?.error || 'Failed to finalize invoice');
       }
 
-      setInvoice(prev => ({
-        ...prev,
+      const next = {
+        ...invoice,
         invoiceId: result.invoiceId,
         invoiceNumber: result.invoiceNumber,
         status: 'FINAL'
-      }));
+      };
+
+      setInvoice(next);
 
       alert(`✅ Invoice finalized! Invoice #${result.invoiceNumber}`);
+
+      // ✅ Return canonical ids/status for callers like handleShare
+      return {
+        invoiceId: result.invoiceId,
+        invoiceNumber: result.invoiceNumber,
+        status: 'FINAL'
+      };
 
     } catch (error) {
       console.error('❌ Finalize error:', error);
       alert(`❌ Error: ${error.message}`);
+      throw error;
     } finally {
       setIsSaving(false);
     }
@@ -1060,11 +1070,12 @@ export default function Invoice() {
   const handleShare = async () => {
 
     // ✅ STEP 1: Finalize the invoice first (if not already finalized)
+    let shareInvoiceId = invoice.invoiceId;
+
     if (invoice.status !== 'FINAL') {
       try {
-        await handleSaveFinalInvoice();
-        // Wait a moment for state to update after finalization
-        await new Promise(resolve => setTimeout(resolve, 500));
+        const finalResult = await handleSaveFinalInvoice();
+        shareInvoiceId = finalResult?.invoiceId || shareInvoiceId;
       } catch (err) {
         console.error('❌ Failed to finalize before sharing:', err);
         alert('❌ Failed to finalize invoice before sharing. Please try again.');
@@ -1089,7 +1100,7 @@ export default function Invoice() {
 
     try {
       const result = await shareInvoice({
-        invoiceId: invoice.invoiceId,
+        invoiceId: shareInvoiceId || invoice.invoiceId,
         html: invoiceHTML,
         projectCode: invoice.projectCode,
         consultantName: invoice.consultantName,
