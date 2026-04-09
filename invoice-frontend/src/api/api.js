@@ -435,7 +435,7 @@ export async function shareInvoice({
       total,              // Optional context
       subtotal,           // Optional context
       gst,                // Optional context
-    }, true, 30000);
+    }, true, 120000);
     return result;
 
   } catch (err) {
@@ -603,7 +603,7 @@ export async function autoShareInvoice(invoiceId) {
   try {
     const result = await apiPost('/invoices/share-auto', {
       invoiceId
-    }, true, 30000);
+    }, true, 120000);
 
     return {
       success: true,
@@ -630,7 +630,7 @@ export async function sendInvoiceToClient(invoiceId) {
 
   try {
     const apiKey = localStorage.getItem('adminApiKey') || '';
-    const result = await apiPost('/invoices/send-to-client', { invoiceId, apiKey }, true, 30000);
+    const result = await apiPost('/invoices/send-to-client', { invoiceId, apiKey }, true, 120000);
     return {
       success: true,
       ok: true,

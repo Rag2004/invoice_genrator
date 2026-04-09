@@ -34,7 +34,41 @@ function recomputeTotals(snapshot) {
   if (!snapshot || typeof snapshot !== 'object') return snapshot;
   const totals = snapshot.totals || {};
   const items = snapshot.work?.items || [];
-  const subtotal = Number(totals.subtotal ?? items.reduce((s, it) => s + Number(it?.amount || 0), 0)) || 0;
+
+  const computeHours = (it) => {
+    if (!it || typeof it !== 'object') return 0;
+    const direct = Number(it.hours);
+    if (Number.isFinite(direct) && direct > 0) return direct;
+    const stageHours = it.stageHours;
+    if (!stageHours || typeof stageHours !== 'object') return 0;
+    let total = 0;
+    Object.values(stageHours).forEach((subMap) => {
+      if (!subMap || typeof subMap !== 'object') return;
+      Object.values(subMap).forEach((v) => {
+        total += Number(v) || 0;
+      });
+    });
+    return total;
+  };
+
+  const normalizedItems = items.map((it) => {
+    const amountNum = Number(it?.amount);
+    if (Number.isFinite(amountNum) && amountNum > 0) return it;
+    const hours = computeHours(it);
+    const rate = Number(it?.rate || 0);
+    const derived = Math.round(hours * rate);
+    return { ...it, hours, amount: derived };
+  });
+
+  if (snapshot.work && typeof snapshot.work === 'object') {
+    snapshot.work = { ...snapshot.work, items: normalizedItems };
+  }
+
+  const subtotal =
+    Number(
+      totals.subtotal ??
+      normalizedItems.reduce((s, it) => s + Number(it?.amount || 0), 0)
+    ) || 0;
 
   const gstRate = normalizeGstRate(
     totals.gstRate ??
@@ -299,7 +333,7 @@ router.get('/approve', async (req, res) => {
           <div class="wrap">
             <div class="card">
               <h1>Approve invoice?</h1>
-              <p>Review this invoice in Hourly if needed, then click Approve to send it to the client.</p>
+              <p>Click Approve to send it to the client.</p>
               <form method="POST" action="/api/invoices/approval/approve">
                 <input type="hidden" name="token" value="${escapeHtml(token)}" />
                 <button type="submit" class="primary">Approve &amp; send to client</button>
@@ -326,11 +360,18 @@ router.post('/approve', async (req, res) => {
     const v = verifyApprovalToken(token);
     if (!v.ok) {
       const isUsed = String(v.error || '').toLowerCase().includes('used');
+      // Make POST idempotent: if token already used, show a success-style page
+      // (email scanners or accidental double-clicks should not look like a failure).
+      if (isUsed) {
+        return res.status(200).send(renderStatusPage({
+          title: 'Already approved',
+          message: 'This invoice was already approved earlier. If you made further changes, please ask the consultant to re-send the invoice for approval.',
+          variant: 'success',
+        }));
+      }
       return res.status(400).send(renderStatusPage({
-        title: isUsed ? 'Invoice already processed' : 'Invalid approval link',
-        message: isUsed
-          ? 'This approval link has already been used. If you made further changes, please ask the consultant to re-send the invoice for approval.'
-          : `This link is ${v.error}. Please request a fresh approval email.`,
+        title: 'Invalid approval link',
+        message: `This link is ${v.error}. Please request a fresh approval email.`,
         variant: 'error',
       }));
     }
@@ -469,7 +510,7 @@ router.get('/reject', async (req, res) => {
           <div class="wrap">
             <div class="card">
               <h1>Reject invoice?</h1>
-              <p>This will notify the consultant and Hourly that the invoice was rejected so it can be revised.</p>
+              <p>Click Reject to notify the consultant.</p>
               <form method="POST" action="/api/invoices/approval/reject">
                 <input type="hidden" name="token" value="${escapeHtml(token)}" />
                 <button type="submit" class="danger">Reject invoice</button>
@@ -496,11 +537,16 @@ router.post('/reject', async (req, res) => {
     const v = verifyApprovalToken(token);
     if (!v.ok) {
       const isUsed = String(v.error || '').toLowerCase().includes('used');
+      if (isUsed) {
+        return res.status(200).send(renderStatusPage({
+          title: 'Already rejected',
+          message: 'This invoice was already rejected earlier. If you made further changes, please ask the consultant to re-send the invoice for approval.',
+          variant: 'success',
+        }));
+      }
       return res.status(400).send(renderStatusPage({
-        title: isUsed ? 'Invoice already processed' : 'Invalid rejection link',
-        message: isUsed
-          ? 'This rejection link has already been used. If you made further changes, please ask the consultant to re-send the invoice for approval.'
-          : `This link is ${v.error}. Please request a fresh approval email.`,
+        title: 'Invalid rejection link',
+        message: `This link is ${v.error}. Please request a fresh approval email.`,
         variant: 'error',
       }));
     }

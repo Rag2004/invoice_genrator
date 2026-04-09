@@ -71,7 +71,9 @@ const recalc = (draft) => {
 
     const rate = Number(item.rate || 0);
     const factor = Number(item.factor || 1);
-    const amount = Math.round(totalHours * rate * factor);
+    // IMPORTANT: `rate` is stored as the effective (already factorized) rate.
+    // Do NOT apply `factor` again here, otherwise we double-factorize.
+    const amount = Math.round(totalHours * rate);
 
     return {
       ...item,
@@ -809,36 +811,31 @@ export default function Invoice() {
      ✅ FINALIZE INVOICE - PRODUCTION FIXED WITH COMPLETE SNAPSHOT
   ============================================================================ */
 
-  const handleSaveFinalInvoice = async () => {
+  const handleSaveFinalInvoice = async ({ silent = false } = {}) => {
     // Validation
     if (!invoice.projectCode?.trim()) {
-      alert('⚠️ Please enter a project code');
-      return;
+      throw new Error('Project code is required.');
     }
 
     if (!invoice.consultantId) {
-      alert('⚠️ Missing consultant information');
-      return;
+      throw new Error('Missing consultant information.');
     }
 
     const consultantId = user?.consultantId || user?.consultant_id;
 
     // ✅ CRITICAL: Verify consultant ID matches
     if (invoice.consultantId !== consultantId) {
-      alert('❌ Security Error: You can only finalize invoices for your own projects!');
-      return;
+      throw new Error('Security error: you can only finalize invoices for your own projects.');
     }
 
     // ✅ Ensure project data exists
     if (!projectData) {
-      alert('⚠️ Invalid project. Please enter a valid project code that belongs to you.');
-      return;
+      throw new Error('Invalid project. Please enter a valid project code that belongs to you.');
     }
 
     const hasHours = invoice.items.some(it => Number(it.hours || 0) > 0);
     if (!hasHours) {
-      alert('⚠️ Please add at least one team member with hours');
-      return;
+      throw new Error('Please add at least one team member with hours.');
     }
 
     setIsSaving(true);
@@ -1025,7 +1022,9 @@ export default function Invoice() {
 
       setInvoice(next);
 
-      alert(`✅ Invoice finalized! Invoice #${result.invoiceNumber}`);
+      if (!silent) {
+        alert(`✅ Invoice finalized! Invoice #${result.invoiceNumber}`);
+      }
 
       // ✅ Return canonical ids/status for callers like handleShare
       return {
@@ -1036,7 +1035,6 @@ export default function Invoice() {
 
     } catch (error) {
       console.error('❌ Finalize error:', error);
-      alert(`❌ Error: ${error.message}`);
       throw error;
     } finally {
       setIsSaving(false);
@@ -1074,12 +1072,11 @@ export default function Invoice() {
 
     if (invoice.status !== 'FINAL') {
       try {
-        const finalResult = await handleSaveFinalInvoice();
+        const finalResult = await handleSaveFinalInvoice({ silent: true });
         shareInvoiceId = finalResult?.invoiceId || shareInvoiceId;
       } catch (err) {
         console.error('❌ Failed to finalize before sharing:', err);
-        alert('❌ Failed to finalize invoice before sharing. Please try again.');
-        return;
+        throw new Error(err?.message || 'Failed to finalize invoice before sharing.');
       }
     }
 
@@ -1088,14 +1085,12 @@ export default function Invoice() {
 
     if (!invoiceRef.current) {
       console.error('❌ invoiceRef.current is null');
-      alert('❌ Invoice reference not found. Please try again.');
-      return;
+      throw new Error('Invoice content reference not found. Please try again.');
     }
 
     const invoiceHTML = invoiceRef.current?.innerHTML || '';
     if (!invoiceHTML || invoiceHTML.trim().length < 100) {
-      alert('❌ Invoice content failed to generate.');
-      return;
+      throw new Error('Invoice content failed to generate.');
     }
 
     try {
@@ -1108,41 +1103,11 @@ export default function Invoice() {
         subtotal: invoice.subtotal,
         gst: invoice.gst,
       });
-
-      if (result.hasPDF) {
-        toast.success(`✅ Sent for approval (PDF attached).`, {
-          autoClose: 4000,
-          position: 'top-center',
-          style: {
-            background: '#10b981',
-            color: '#fff',
-            fontWeight: 600,
-            fontSize: '15px',
-            borderRadius: '12px',
-            boxShadow: '0 8px 32px rgba(16, 185, 129, 0.35)',
-            padding: '14px 24px',
-          },
-        });
-      } else {
-        toast.success(`✅ Sent for approval.`, {
-          autoClose: 4000,
-          position: 'top-center',
-          style: {
-            background: '#10b981',
-            color: '#fff',
-            fontWeight: 600,
-            fontSize: '15px',
-            borderRadius: '12px',
-            boxShadow: '0 8px 32px rgba(16, 185, 129, 0.35)',
-            padding: '14px 24px',
-          },
-        });
-      }
-
       setIsShareDialogOpen(false);
+      return result;
     } catch (error) {
       console.error('❌ Share error:', error);
-      alert(`❌ Failed to share invoice: ${error.message}`);
+      throw new Error(error?.message || 'Failed to share invoice');
     }
   };
 

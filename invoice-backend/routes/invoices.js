@@ -52,7 +52,42 @@ function recomputeSnapshotTotals(snapshot) {
   if (!snapshot || typeof snapshot !== 'object') return snapshot;
   const totals = snapshot.totals || {};
   const items = snapshot.work?.items || [];
-  const subtotal = Number(totals.subtotal ?? items.reduce((s, it) => s + Number(it?.amount || 0), 0)) || 0;
+
+  const computeHours = (it) => {
+    if (!it || typeof it !== 'object') return 0;
+    const direct = Number(it.hours);
+    if (Number.isFinite(direct) && direct > 0) return direct;
+    const stageHours = it.stageHours;
+    if (!stageHours || typeof stageHours !== 'object') return 0;
+    let total = 0;
+    Object.values(stageHours).forEach((subMap) => {
+      if (!subMap || typeof subMap !== 'object') return;
+      Object.values(subMap).forEach((v) => {
+        total += Number(v) || 0;
+      });
+    });
+    return total;
+  };
+
+  // Ensure line amounts exist (fallback: hours × effectiveRate)
+  const normalizedItems = items.map((it) => {
+    const amountNum = Number(it?.amount);
+    if (Number.isFinite(amountNum) && amountNum > 0) return it;
+    const hours = computeHours(it);
+    const rate = Number(it?.rate || 0);
+    const derived = Math.round(hours * rate);
+    return { ...it, hours, amount: derived };
+  });
+
+  if (snapshot.work && typeof snapshot.work === 'object') {
+    snapshot.work = { ...snapshot.work, items: normalizedItems };
+  }
+
+  const subtotal =
+    Number(
+      totals.subtotal ??
+      normalizedItems.reduce((s, it) => s + Number(it?.amount || 0), 0)
+    ) || 0;
   const gstRate = normalizeGstRate(
     totals.gstRate ??
     snapshot.project?.gstRate ??
@@ -649,7 +684,7 @@ router.post('/share', async (req, res) => {
     // ✅ INTERNAL SEND: Hourly + consultant (NO client)
     const hourlyRecipients = parseEmailList(process.env.ADMIN_CC_EMAIL);
     if (hourlyRecipients.length === 0) {
-      return res.status(500).json({
+      return res.status(400).json({
         ok: false,
         error: 'Hourly recipient emails not configured. Set ADMIN_CC_EMAIL in backend .env'
       });

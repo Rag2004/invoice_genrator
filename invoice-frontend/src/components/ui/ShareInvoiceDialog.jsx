@@ -1,36 +1,58 @@
 
 // components/ui/ShareInvoiceDialog.jsx
 import React, { useState, useEffect } from 'react';
+import { toast } from 'react-toastify';
 
 const ShareInvoiceDialog = ({ isOpen, onClose, invoiceData, clientEmail, onShare }) => {
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState(false);
 
   // Reset state when dialog opens/closes
   useEffect(() => {
     if (!isOpen) {
-      setError('');
-      setSuccess(false);
       setIsLoading(false);
     }
   }, [isOpen]);
 
+  const normalizeShareError = (err) => {
+    const msg = String(err?.message || err || 'Failed to send invoice');
+    if (msg.toLowerCase().includes('request timeout')) {
+      return 'Request timed out while sending. Please check Hourly inbox and try again.';
+    }
+    return msg;
+  };
+
   const handleShare = async () => {
-    setError('');
     setIsLoading(true);
 
     try {
       // Send for approval (Hourly + consultant). No client email.
-      await onShare();
-      setSuccess(true);
-      
-      // Auto-close after 2 seconds on success
-      setTimeout(() => {
-        onClose();
-      }, 2000);
+      const result = await onShare();
+
+      const invoiceNumber =
+        result?.invoiceNumber ||
+        invoiceData?.invoiceNumber ||
+        invoiceData?.invoiceId ||
+        null;
+      const sentTo = Array.isArray(result?.sentTo)
+        ? result.sentTo.join(', ')
+        : (result?.sentTo || null);
+
+      toast.success(
+        `Sent for approval${invoiceNumber ? `: ${invoiceNumber}` : ''}${sentTo ? ` • ${sentTo}` : ''}`,
+        {
+          position: 'top-center',
+          autoClose: 3500,
+          toastId: `share-success-${invoiceNumber || 'unknown'}`,
+        }
+      );
+
+      onClose();
     } catch (err) {
-      setError(err.message || 'Failed to send invoice. Please try again.');
+      toast.error(`Not sent: ${normalizeShareError(err)}`, {
+        position: 'top-center',
+        autoClose: 5000,
+        toastId: 'share-error',
+      });
     } finally {
       setIsLoading(false);
     }
@@ -40,46 +62,46 @@ const ShareInvoiceDialog = ({ isOpen, onClose, invoiceData, clientEmail, onShare
 
   return (
     <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      zIndex: 9999,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-    }}>
-      {/* Backdrop */}
-      <div
-        onClick={onClose}
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.5)',
-          zIndex: 1,
-        }}
-      />
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 9999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}>
+        {/* Backdrop */}
+        <div
+          onClick={onClose}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            zIndex: 1,
+          }}
+        />
 
-      {/* Dialog */}
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          position: 'relative',
-          zIndex: 2,
-          backgroundColor: 'white',
-          borderRadius: '12px',
-          boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
-          maxWidth: '500px',
-          width: '90%',
-          padding: '24px',
-          maxHeight: '90vh',
-          overflowY: 'auto',
-        }}
-      >
+        {/* Dialog */}
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: 'relative',
+            zIndex: 2,
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
+            maxWidth: '500px',
+            width: '90%',
+            padding: '24px',
+            maxHeight: '90vh',
+            overflowY: 'auto',
+          }}
+        >
         {/* Header */}
         <div style={{
           display: 'flex',
@@ -127,47 +149,6 @@ const ShareInvoiceDialog = ({ isOpen, onClose, invoiceData, clientEmail, onShare
             </svg>
           </button>
         </div>
-
-        {/* Success Message */}
-        {success && (
-          <div style={{
-            marginBottom: '16px',
-            padding: '16px',
-            backgroundColor: '#f0fdf4',
-            border: '1px solid #86efac',
-            borderRadius: '8px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px',
-          }}>
-            <svg
-              style={{
-                width: '20px',
-                height: '20px',
-                color: '#16a34a',
-                flexShrink: 0,
-              }}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M5 13l4 4L19 7"
-              />
-            </svg>
-            <p style={{
-              fontSize: '14px',
-              color: '#15803d',
-              fontWeight: '500',
-              margin: 0,
-            }}>
-              Invoice sent for approval successfully!
-            </p>
-          </div>
-        )}
 
         {/* Invoice Info */}
         <div style={{
@@ -268,35 +249,6 @@ const ShareInvoiceDialog = ({ isOpen, onClose, invoiceData, clientEmail, onShare
           </p>
         </div>
 
-        {/* Error Message */}
-        {error && (
-          <div style={{
-            marginBottom: '16px',
-            padding: '12px',
-            backgroundColor: '#fef2f2',
-            border: '1px solid #fca5a5',
-            borderRadius: '8px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-          }}>
-            <svg
-              style={{ width: '16px', height: '16px', color: '#dc2626', flexShrink: 0 }}
-              fill="currentColor"
-              viewBox="0 0 20 20"
-            >
-              <path
-                fillRule="evenodd"
-                d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
-                clipRule="evenodd"
-              />
-            </svg>
-            <p style={{ fontSize: '14px', color: '#dc2626', margin: 0 }}>
-              {error}
-            </p>
-          </div>
-        )}
-
         {/* Footer Buttons */}
         <div style={{
           display: 'flex',
@@ -329,7 +281,7 @@ const ShareInvoiceDialog = ({ isOpen, onClose, invoiceData, clientEmail, onShare
           </button>
           <button
             onClick={handleShare}
-            disabled={isLoading || success}
+            disabled={isLoading}
             style={{
               padding: '10px 16px',
               fontSize: '14px',
@@ -338,8 +290,8 @@ const ShareInvoiceDialog = ({ isOpen, onClose, invoiceData, clientEmail, onShare
               backgroundColor: '#3b82f6',
               border: 'none',
               borderRadius: '8px',
-              cursor: isLoading || success ? 'not-allowed' : 'pointer',
-              opacity: isLoading || success ? 0.6 : 1,
+              cursor: isLoading ? 'not-allowed' : 'pointer',
+              opacity: isLoading ? 0.6 : 1,
               transition: 'all 0.2s',
               display: 'flex',
               alignItems: 'center',
@@ -348,7 +300,7 @@ const ShareInvoiceDialog = ({ isOpen, onClose, invoiceData, clientEmail, onShare
               justifyContent: 'center',
             }}
             onMouseEnter={(e) => {
-              if (!isLoading && !success) e.target.style.backgroundColor = '#2563eb';
+              if (!isLoading) e.target.style.backgroundColor = '#2563eb';
             }}
             onMouseLeave={(e) => {
               e.target.style.backgroundColor = '#3b82f6';
@@ -381,23 +333,6 @@ const ShareInvoiceDialog = ({ isOpen, onClose, invoiceData, clientEmail, onShare
                   />
                 </svg>
                 Sending...
-              </>
-            ) : success ? (
-              <>
-                <svg
-                  style={{ width: '16px', height: '16px' }}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M5 13l4 4L19 7"
-                  />
-                </svg>
-                Sent!
               </>
             ) : (
               <>
