@@ -934,7 +934,8 @@ export default function Invoice() {
 
         project: {
           projectCode: invoice.projectCode,
-          projectId: projectData?.projectId || invoice.projectCode
+          projectId: projectData?.projectId || invoice.projectCode,
+          hourlyRate: Number(projectData?.hourlyRate ?? invoice.baseHourlyRate ?? 0)
         },
 
         consultant: {
@@ -991,6 +992,12 @@ export default function Invoice() {
           serviceFeePct: invoice.serviceFeePct,
           serviceFeeAmount: invoice.serviceFeeAmount,
           netEarnings: invoice.netEarnings
+        },
+
+        config: {
+          baseHourlyRate: Number(invoice.baseHourlyRate || 0),
+          serviceFeePct: Number(invoice.serviceFeePct || 0),
+          gstRate: Number(invoice.gstRate || 0)
         },
 
         compliance: {
@@ -1514,7 +1521,8 @@ export default function Invoice() {
 
               project: {
                 projectCode: invoice.projectCode,
-                projectId: projectData?.projectId || projectData?.Project_Code || invoice.projectCode
+                projectId: projectData?.projectId || projectData?.Project_Code || invoice.projectCode,
+                hourlyRate: Number(projectData?.hourlyRate ?? invoice.baseHourlyRate ?? 0)
               },
 
               consultant: {
@@ -1577,6 +1585,12 @@ export default function Invoice() {
                 serviceFeePct: Number(invoice.serviceFeePct || 0),
                 serviceFeeAmount: Number(invoice.serviceFeeAmount || 0),
                 netEarnings: Number(invoice.netEarnings || 0)
+              },
+
+              config: {
+                baseHourlyRate: Number(invoice.baseHourlyRate || 0),
+                serviceFeePct: Number(invoice.serviceFeePct || 0),
+                gstRate: Number(invoice.gstRate || 0)
               },
 
               compliance: {

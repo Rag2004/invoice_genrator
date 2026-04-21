@@ -96,28 +96,14 @@ export default function InvoiceComplete({ invoice = {} }) {
   const clientId = client.code || "";
   const consultantDisplayName = consultant.name || "";
 
-  // Consultant fee should always show the BASE hourly rate (not factorised item rates).
-  // `items[].rate` is an effective (factorised) rate, so never fall back to it for display.
+  // Consultant fee must show base rate from project/snapshot context only.
   const baseHourlyRateRaw =
-    consultant.hourlyRate ??
     project.hourlyRate ??
-    snapshot.baseHourlyRate ??
     snapshot.config?.baseHourlyRate ??
+    snapshot.baseHourlyRate ??
+    consultant.hourlyRate ??
     0;
-  let consultantHourlyRate = Number(baseHourlyRateRaw || 0);
-
-  // If the stored hourly rate is actually net-of-service-fee, reconstruct base rate for display.
-  const svcPct = Number(totals.serviceFeePct ?? snapshot.serviceFeePct ?? 0);
-  if (consultantHourlyRate > 0 && Number.isFinite(svcPct) && svcPct > 0 && svcPct < 100) {
-    const candidateBase = consultantHourlyRate / (1 - svcPct / 100);
-    // Prefer a clean-looking base rate when available (e.g., 5000 instead of 3750).
-    if (Number.isFinite(candidateBase) && candidateBase > consultantHourlyRate) {
-      const rounded = Math.round(candidateBase);
-      if (Math.abs(candidateBase - rounded) < 0.001) {
-        consultantHourlyRate = rounded;
-      }
-    }
-  }
+  const consultantHourlyRate = Number(baseHourlyRateRaw || 0);
 
   const consultantFee = formatINR(consultantHourlyRate);
 

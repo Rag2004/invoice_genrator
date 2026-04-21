@@ -52,16 +52,15 @@ export function buildInvoiceSnapshot(invoice, projectData, clientData, consultan
   // ============================================================================
   const project = {
     projectCode: invoice.projectCode || '',
-    projectId: projectData?.projectId || projectData?.Project_Code || invoice.projectCode || ''
+    projectId: projectData?.projectId || projectData?.Project_Code || invoice.projectCode || '',
+    hourlyRate: Number(projectData?.hourlyRate ?? invoice.baseHourlyRate ?? 0)
   };
 
   // ============================================================================
   // CONSULTANT
   // ============================================================================
 
-  // ✅ Extract hourly rate from first item (if exists)
-  const firstItem = invoice.items?.[0];
-  const hourlyRate = firstItem?.rate || invoice.baseHourlyRate || 0;
+  const baseHourlyRate = Number(projectData?.hourlyRate ?? invoice.baseHourlyRate ?? 0);
 
   // Consultant variables
   const consultantGstin =
@@ -104,7 +103,7 @@ export function buildInvoiceSnapshot(invoice, projectData, clientData, consultan
       consultantData?.cin ||
       '',
     stateCode: consultantState,
-    hourlyRate: hourlyRate
+    hourlyRate: baseHourlyRate
   };
   // ============================================================================
   // CLIENT
@@ -234,6 +233,11 @@ export function buildInvoiceSnapshot(invoice, projectData, clientData, consultan
   // NOTES
   // ============================================================================
   const notes = invoice.notes || '';
+  const config = {
+    baseHourlyRate,
+    serviceFeePct: Number(invoice.serviceFeePct || 0),
+    gstRate: Number(invoice.gstRate || 0)
+  };
 
   // ============================================================================
   // ASSEMBLE CANONICAL SNAPSHOT
@@ -246,6 +250,7 @@ export function buildInvoiceSnapshot(invoice, projectData, clientData, consultan
     serviceProvider,
     work,
     totals,
+    config,
     compliance,
     notes
   };
